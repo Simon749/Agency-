@@ -1,4 +1,3 @@
-// app/(tenant)/layout.tsx
 import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
@@ -21,8 +20,6 @@ export default async function TenantLayout({
     .where(eq(tenants.clerkUserId, userId))
     .limit(1);
 
-  // If no tenant profile linked, show a message instead of blocking
-  // (they might be a new invite who hasn't accepted yet)
   if (!tenant) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
@@ -38,7 +35,6 @@ export default async function TenantLayout({
 
   return (
     <div className="min-h-screen bg-black text-white">
-      {/* Tenant Nav */}
       <nav className="border-b border-white/10 px-6 py-4">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <Link href="/tenant/dashboard" className="text-lg font-medium tracking-tight">
@@ -62,6 +58,12 @@ export default async function TenantLayout({
               className="text-white/60 hover:text-white transition"
             >
               My Lease
+            </Link>
+            <Link
+              href="/tenant/complaints"
+              className="text-white/60 hover:text-white transition"
+            >
+              Complaints
             </Link>
             <span className="text-white/40 text-xs">
               {tenant.fullName}
