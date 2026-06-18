@@ -1,4 +1,6 @@
 // app/(admin)/admin/layout.tsx
+// Updated for Week 15: added Staff link (AGENCY_OWNER only), Arrears for Field Agent.
+
 import { redirect } from 'next/navigation';
 import { requireRole } from '@/lib/auth/getRole';
 import { getDb } from '@/lib/db';
@@ -40,6 +42,7 @@ export default async function AdminLayout({
     { href: '/admin/tenants', label: 'Tenants', roles: ['AGENCY_OWNER', 'MANAGER'] },
     { href: '/admin/leases', label: 'Leases', roles: ['AGENCY_OWNER', 'MANAGER'] },
     { href: '/admin/complaints', label: 'Complaints', roles: ['AGENCY_OWNER', 'MANAGER'] },
+    { href: '/admin/arrears', label: 'Arrears', roles: ['AGENCY_OWNER', 'MANAGER', 'FIELD_AGENT'] },
     { href: '/admin/agent/meter-readings', label: 'Meter Readings', roles: ['FIELD_AGENT', 'MANAGER', 'AGENCY_OWNER'] },
     { href: '/admin/agent/receipts', label: 'Receipts', roles: ['FIELD_AGENT', 'MANAGER', 'AGENCY_OWNER'] },
     { href: '/admin/settings', label: 'Settings', roles: ['AGENCY_OWNER'] },

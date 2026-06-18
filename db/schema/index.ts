@@ -13,3 +13,4 @@ export * from "./tenant_ledger";
 export * from "./utility_readings";
 export * from "./pending_transactions";
 export * from "./complaints";
+export * from "./staff";

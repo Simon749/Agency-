@@ -1,304 +1,180 @@
 // app/(admin)/admin/settings/lease-template/page.tsx
-// Admin — per-building lease template editor with placeholder reference.
+// Lease agreement template editor per building — AGENCY_OWNER only.
+// Uses Markdown with {{placeholders}}. Preview + save per building.
 
-import { redirect } from "next/navigation";
-import { getSessionMeta } from "@/lib/auth/getRole";
-import { getDb } from "@/lib/db";
-import { buildings } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
-import { placeholderList, defaultLeaseTemplate } from "@/lib/lease";
-import { revalidatePath } from "next/cache";
+import { getSessionMeta, requireRole } from '@/lib/auth/getRole';
+import { getDb } from '@/lib/db';
+import { buildings } from '@/db/schema';
+import { eq } from 'drizzle-orm';
+import { redirect } from 'next/navigation';
+import { revalidatePath } from 'next/cache';
+import { updateLeaseTemplate } from '@/lib/settings/actions';
 
-export default async function LeaseTemplatePage({
-  searchParams,
-}: {
-  searchParams: Promise<{ buildingId?: string; saved?: string }>;
-}) {
+export const metadata = {
+  title: 'Lease Templates — PropFlow',
+};
+
+export default async function LeaseTemplatePage() {
+  await requireRole(['AGENCY_OWNER']);
   const session = await getSessionMeta();
-  const { agencyId, role } = session;
+  const agencyId = session.agencyId;
 
-  if (!["AGENCY_OWNER", "MANAGER"].includes(role ?? "")) {
-    redirect("/admin/dashboard");
-  }
-
-  if (!agencyId) redirect("/pending-setup");
+  if (!agencyId) redirect('/pending-setup');
 
   const db = getDb();
-  const params = await searchParams;
-
-  // Load all buildings for this agency
   const buildingList = await db
-    .select({ id: buildings.id, name: buildings.name, location: buildings.location, agreementTemplate: buildings.agreementTemplate })
+    .select({ id: buildings.id, name: buildings.name, agreementTemplate: buildings.agreementTemplate })
     .from(buildings)
     .where(eq(buildings.agencyId, agencyId));
 
-  const selectedBuilding = params.buildingId
-    ? buildingList.find((b) => b.id === params.buildingId)
-    : null;
+  const placeholders = [
+    '{{AGENCY_NAME}}',
+    '{{LANDLORD_NAME}}',
+    '{{BUILDING_NAME}}',
+    '{{UNIT_NUMBER}}',
+    '{{BUILDING_LOCATION}}',
+    '{{TENANT_NAME}}',
+    '{{LEASE_START}}',
+    '{{LEASE_END}}',
+    '{{RENT_AMOUNT}}',
+    '{{DEPOSIT_AMOUNT}}',
+    '{{ESCALATION_VALUE}}',
+    '{{ESCALATION_UNIT}}',
+  ];
 
   return (
-    <div style={{ maxWidth: "960px" }}>
-      <p
-        style={{
-          fontSize: "11px",
-          letterSpacing: "0.22em",
-          color: "rgba(255,255,255,0.45)",
-          textTransform: "uppercase",
-          marginBottom: "12px",
-        }}
-      >
-        Settings
+    <div>
+      <p style={{ fontSize: '11px', letterSpacing: '0.22em', color: 'rgba(255,255,255,0.45)', textTransform: 'uppercase', marginBottom: '12px' }}>
+        Agency Settings
       </p>
-      <h1
-        style={{
-          fontSize: "clamp(28px, 3.5vw, 44px)",
-          fontWeight: 400,
-          letterSpacing: "-0.02em",
-          marginBottom: "8px",
-          color: "#ffffff",
-        }}
-      >
-        Lease Agreement Template
+      <h1 style={{ fontSize: 'clamp(28px, 3.5vw, 44px)', fontWeight: 400, letterSpacing: '-0.02em', marginBottom: '48px', color: '#ffffff' }}>
+        Lease Templates
       </h1>
-      <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.5)", marginBottom: "48px" }}>
-        Customize the lease agreement template per building. Use placeholders to auto-fill tenant and property details.
+
+      <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.4)', marginBottom: '48px', maxWidth: '700px', lineHeight: 1.6 }}>
+        Manage tenancy agreement templates per building. Use Markdown with placeholders. When a tenant is invited, the template is auto-populated with their details and sent for digital signing.
       </p>
 
-      {/* Saved Banner */}
-      {params.saved === "1" && (
-        <div
-          style={{
-            backgroundColor: "rgba(74, 222, 128, 0.1)",
-            border: "1px solid rgba(74, 222, 128, 0.3)",
-            padding: "16px 20px",
-            marginBottom: "32px",
-            color: "#4ade80",
-            fontSize: "14px",
-          }}
-        >
-          ✅ Template saved successfully.
-        </div>
-      )}
-
-      {/* Building Selector */}
-      <section style={{ marginBottom: "48px" }}>
-        <p
-          style={{
-            fontSize: "11px",
-            letterSpacing: "0.2em",
-            color: "rgba(255,255,255,0.45)",
-            textTransform: "uppercase",
-            marginBottom: "16px",
-            paddingBottom: "12px",
-            borderBottom: "1px solid rgba(255,255,255,0.1)",
-          }}
-        >
-          Select Building
+      {/* Placeholder reference */}
+      <div style={{ marginBottom: '48px', padding: '20px 24px', backgroundColor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', maxWidth: '700px' }}>
+        <p style={{ fontSize: '11px', letterSpacing: '0.18em', color: 'rgba(255,255,255,0.45)', textTransform: 'uppercase', marginBottom: '12px' }}>
+          Available Placeholders
         </p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "8px" }}>
-          {buildingList.map((b) => (
-            <a
-              key={b.id}
-              href={`/admin/settings/lease-template?buildingId=${b.id}`}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+          {placeholders.map((p) => (
+            <code
+              key={p}
               style={{
-                padding: "16px 20px",
-                backgroundColor: selectedBuilding?.id === b.id ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)",
-                border: selectedBuilding?.id === b.id ? "1px solid rgba(255,255,255,0.25)" : "1px solid rgba(255,255,255,0.07)",
-                textDecoration: "none",
-                color: "#ffffff",
-                display: "block",
+                fontSize: '12px',
+                padding: '4px 10px',
+                backgroundColor: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                color: 'rgba(255,255,255,0.7)',
+                fontFamily: 'monospace',
+                borderRadius: '2px',
               }}
             >
-              <p style={{ fontSize: "14px", fontWeight: 500, margin: "0 0 4px 0" }}>{b.name}</p>
-              <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>{b.location}</p>
-            </a>
+              {p}
+            </code>
           ))}
         </div>
-      </section>
+      </div>
 
-      {/* Template Editor */}
-      {selectedBuilding && (
-        <section>
-          <p
-            style={{
-              fontSize: "11px",
-              letterSpacing: "0.2em",
-              color: "rgba(255,255,255,0.45)",
-              textTransform: "uppercase",
-              marginBottom: "16px",
-              paddingBottom: "12px",
-              borderBottom: "1px solid rgba(255,255,255,0.1)",
-            }}
-          >
-            Edit Template — {selectedBuilding.name}
-          </p>
-
+      {/* Per-building templates */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+        {buildingList.map((b) => (
           <div
+            key={b.id}
             style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 280px",
-              gap: "32px",
+              backgroundColor: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              padding: '28px 24px',
             }}
           >
-            {/* Editor */}
-            <form action={saveTemplate}>
-              <input type="hidden" name="buildingId" value={selectedBuilding.id} />
+            <p style={{ fontSize: '15px', fontWeight: 500, color: '#ffffff', marginBottom: '20px' }}>
+              {b.name}
+            </p>
 
-              <div style={{ marginBottom: "16px" }}>
-                <label
-                  style={{
-                    fontSize: "11px",
-                    letterSpacing: "0.18em",
-                    color: "rgba(255,255,255,0.5)",
-                    textTransform: "uppercase",
-                    display: "block",
-                    marginBottom: "8px",
-                  }}
-                >
-                  Template (Markdown)
-                </label>
-                <textarea
-                  name="template"
-                  defaultValue={selectedBuilding.agreementTemplate ?? defaultLeaseTemplate}
-                  rows={30}
-                  style={{
-                    width: "100%",
-                    padding: "16px",
-                    fontSize: "13px",
-                    lineHeight: 1.6,
-                    backgroundColor: "rgba(255,255,255,0.03)",
-                    color: "#ffffff",
-                    border: "1px solid rgba(255,255,255,0.15)",
-                    fontFamily: '"SF Mono", "Fira Code", monospace',
-                    resize: "vertical",
-                  }}
-                />
-              </div>
-
-              <div style={{ display: "flex", gap: "12px" }}>
-                <button
-                  type="submit"
-                  style={{
-                    padding: "13px 28px",
-                    fontSize: "12px",
-                    fontWeight: 500,
-                    letterSpacing: "0.16em",
-                    color: "#0b0b0b",
-                    backgroundColor: "#ffffff",
-                    border: "1px solid #ffffff",
-                    cursor: "pointer",
-                    textTransform: "uppercase",
-                    fontFamily: '"Helvetica Neue", sans-serif',
-                  }}
-                >
-                  Save Template
-                </button>
-                <a
-                  href={`/admin/settings/lease-template?buildingId=${selectedBuilding.id}`}
-                  style={{
-                    padding: "13px 28px",
-                    fontSize: "12px",
-                    fontWeight: 500,
-                    letterSpacing: "0.16em",
-                    color: "#ffffff",
-                    backgroundColor: "transparent",
-                    border: "1px solid rgba(255,255,255,0.25)",
-                    textDecoration: "none",
-                    textTransform: "uppercase",
-                    display: "inline-block",
-                    fontFamily: '"Helvetica Neue", sans-serif',
-                  }}
-                >
-                  Reset to Default
-                </a>
-              </div>
+            <form
+              action={async (formData: FormData) => {
+                'use server';
+                await requireRole(['AGENCY_OWNER']);
+                await updateLeaseTemplate(b.id, agencyId, formData.get('template') as string);
+                revalidatePath('/admin/settings/lease-template');
+              }}
+            >
+              <textarea
+                name="template"
+                defaultValue={b.agreementTemplate ?? defaultTemplate}
+                rows={20}
+                style={{
+                  width: '100%',
+                  padding: '16px',
+                  fontSize: '13px',
+                  lineHeight: 1.6,
+                  backgroundColor: 'rgba(0,0,0,0.3)',
+                  color: '#ffffff',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  outline: 'none',
+                  fontFamily: 'monospace',
+                  resize: 'vertical',
+                  marginBottom: '20px',
+                }}
+              />
+              <button
+                type="submit"
+                style={{
+                  padding: '12px 28px',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  letterSpacing: '0.16em',
+                  color: '#0b0b0b',
+                  backgroundColor: '#ffffff',
+                  border: '1px solid #ffffff',
+                  cursor: 'pointer',
+                  textTransform: 'uppercase',
+                  fontFamily: '"Helvetica Neue", sans-serif',
+                }}
+              >
+                Save Template
+              </button>
             </form>
-
-            {/* Placeholder Reference */}
-            <div>
-              <p
-                style={{
-                  fontSize: "11px",
-                  letterSpacing: "0.18em",
-                  color: "rgba(255,255,255,0.5)",
-                  textTransform: "uppercase",
-                  marginBottom: "16px",
-                }}
-              >
-                Available Placeholders
-              </p>
-              <div
-                style={{
-                  backgroundColor: "rgba(255,255,255,0.03)",
-                  border: "1px solid rgba(255,255,255,0.07)",
-                  padding: "20px",
-                  maxHeight: "600px",
-                  overflowY: "auto",
-                }}
-              >
-                {placeholderList.map((ph) => (
-                  <div
-                    key={ph.key}
-                    style={{
-                      padding: "10px 0",
-                      borderBottom: "1px solid rgba(255,255,255,0.05)",
-                    }}
-                  >
-                    <code
-                      style={{
-                        fontSize: "12px",
-                        color: "#4ade80",
-                        fontFamily: '"SF Mono", monospace',
-                        backgroundColor: "rgba(255,255,255,0.05)",
-                        padding: "2px 6px",
-                        borderRadius: "3px",
-                      }}
-                    >
-                      {ph.key}
-                    </code>
-                    <p
-                      style={{
-                        fontSize: "12px",
-                        color: "rgba(255,255,255,0.4)",
-                        margin: "4px 0 0 0",
-                      }}
-                    >
-                      {ph.description}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
-        </section>
-      )}
+        ))}
+      </div>
     </div>
   );
 }
 
-// ── Server Action ─────────────────────────────────────────────────────────
+const defaultTemplate = `# TENANCY AGREEMENT
 
-async function saveTemplate(formData: FormData) {
-  "use server";
+This agreement is made between **{{AGENCY_NAME}}** (the Agent) acting on behalf of **{{LANDLORD_NAME}}** (the Landlord) and **{{TENANT_NAME}}** (the Tenant).
 
-  const session = await getSessionMeta();
-  if (!["AGENCY_OWNER", "MANAGER"].includes(session.role ?? "")) {
-    throw new Error("Unauthorized");
-  }
+**Property:** {{BUILDING_NAME}}, Unit {{UNIT_NUMBER}}, {{BUILDING_LOCATION}}
 
-  const buildingId = formData.get("buildingId") as string;
-  const template = formData.get("template") as string;
+**Lease Term:** {{LEASE_START}} to {{LEASE_END}}
 
-  if (!buildingId || !template) {
-    throw new Error("Missing required fields");
-  }
+**Monthly Rent:** KES {{RENT_AMOUNT}}
 
-  const db = getDb();
-  await db
-    .update(buildings)
-    .set({ agreementTemplate: template.trim() })
-    .where(and(eq(buildings.id, buildingId), eq(buildings.agencyId, session.agencyId!)));
+**Deposit:** KES {{DEPOSIT_AMOUNT}}
 
-  revalidatePath(`/admin/settings/lease-template?buildingId=${buildingId}`);
-  redirect(`/admin/settings/lease-template?buildingId=${buildingId}&saved=1`);
-}
+**Rent Escalation:** Upon renewal, rent will increase by {{ESCALATION_VALUE}}{{ESCALATION_UNIT}}.
+
+---
+
+## Terms and Conditions
+
+1. Rent is due on the 1st of every month.
+2. Late payment attracts a penalty of 10% after the 5th day.
+3. The tenant shall maintain the property in good condition.
+4. Subletting is prohibited without written consent.
+5. Either party may terminate with 30 days written notice.
+
+---
+
+Signed on behalf of the Landlord: ___________________
+
+Signed by the Tenant: ___________________
+
+Date: ___________________
+`;
