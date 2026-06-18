@@ -3,7 +3,6 @@
 
 export {
   getStaffByAgency,
-  getStaffById,
   getStaffByClerkId,
   insertStaff,
   deactivateStaff,

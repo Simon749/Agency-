@@ -1,16 +1,12 @@
 // lib/staff/actions.ts
-// Server Actions for staff management — secured to AGENCY_OWNER only.
-// Uses Clerk Invitation API for invites + DB staff table for tracking.
+// Server Actions for staff management — Clerk is the single source of truth.
+// No DB staff table. All state lives in Clerk.
 
 "use server";
 
 import { clerkClient } from "@clerk/nextjs/server";
 import { getSessionMeta, requireRole } from "@/lib/auth/getRole";
-import { getDb } from "@/lib/db";
-import { staff, buildings } from "@/db/schema";
-import { eq, and, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { insertStaff, deactivateStaff, reactivateStaff, updateStaffBuildings } from "./queries";
 
 // ── 1. Invite Staff (Manager or Field Agent) ───────────────────────────────
 
@@ -22,7 +18,6 @@ export async function inviteStaff(formData: {
   nationalId?: string;
   assignedBuildingIds?: string[];
 }): Promise<{ success: boolean; message: string; inviteUrl?: string }> {
-  // Enforce AGENCY_OWNER only
   await requireRole(["AGENCY_OWNER"]);
   const session = await getSessionMeta();
   const agencyId = session.agencyId;
@@ -36,7 +31,11 @@ export async function inviteStaff(formData: {
   try {
     const clerk = await clerkClient();
 
-    // Create invitation via Clerk
+    // Parse fullName into first/last for Clerk
+    const nameParts = fullName.trim().split(/\s+/);
+    const firstName = nameParts[0] ?? "";
+    const lastName = nameParts.slice(1).join(" ") ?? "";
+
     const invitation = await clerk.invitations.createInvitation({
       emailAddress: email,
       publicMetadata: {
@@ -44,22 +43,12 @@ export async function inviteStaff(formData: {
         agencyId,
         buildingId: null,
         unitId: null,
+        nationalId: nationalId ?? null,
+        assignedBuildingIds: assignedBuildingIds ?? [],
       },
-      redirectUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}${
-        role === "FIELD_AGENT" ? "/admin/agent/meter-readings" : "/admin/dashboard"
+      redirectUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}${ 
+        role === "FIELD_AGENT" ? "/admin/agent/meter-readings" : "/admin/dashboard" 
       }`,
-    });
-
-    // Insert into staff table for tracking
-    await insertStaff({
-      clerkUserId: invitation.id, // temp ID until they accept
-      agencyId,
-      fullName,
-      email,
-      phone,
-      role,
-      nationalId,
-      assignedBuildingIds,
     });
 
     revalidatePath("/admin/settings/staff");
@@ -67,7 +56,7 @@ export async function inviteStaff(formData: {
     return {
       success: true,
       message: `Invitation sent to ${email}. They will appear in the list once they accept.`,
-      inviteUrl: invitation.url, // owner can copy-paste to WhatsApp if email fails
+      inviteUrl: invitation.url,
     };
   } catch (err) {
     console.error("[STAFF INVITE] Failed:", err);
@@ -80,7 +69,7 @@ export async function inviteStaff(formData: {
 
 // ── 2. Deactivate Staff ────────────────────────────────────────────────────
 
-export async function deactivateStaffAction(staffId: string): Promise<{ success: boolean; message: string }> {
+export async function deactivateStaffAction(clerkUserId: string): Promise<{ success: boolean; message: string }> {
   await requireRole(["AGENCY_OWNER"]);
   const session = await getSessionMeta();
   const agencyId = session.agencyId;
@@ -90,27 +79,17 @@ export async function deactivateStaffAction(staffId: string): Promise<{ success:
   }
 
   try {
-    const db = getDb();
-    const [staffRow] = await db
-      .select({ clerkUserId: staff.clerkUserId })
-      .from(staff)
-      .where(and(eq(staff.id, staffId), eq(staff.agencyId, agencyId)));
-
-    if (!staffRow) {
-      return { success: false, message: "Staff not found" };
+    const clerk = await clerkClient();
+    
+    // Verify the user belongs to this agency before banning
+    const user = await clerk.users.getUser(clerkUserId);
+    const meta = user.publicMetadata as Record<string, unknown>;
+    
+    if (meta.agencyId !== agencyId) {
+      return { success: false, message: "Staff not found in your agency" };
     }
 
-    // Deactivate in DB
-    await deactivateStaff(staffId, agencyId);
-
-    // Also ban in Clerk (they can no longer sign in)
-    try {
-      const clerk = await clerkClient();
-      await clerk.users.banUser(staffRow.clerkUserId);
-    } catch {
-      // Clerk ban may fail if user hasn't accepted invite yet — that's OK
-      console.warn(`[STAFF] Could not ban Clerk user ${staffRow.clerkUserId} — may be pending invite`);
-    }
+    await clerk.users.banUser(clerkUserId);
 
     revalidatePath("/admin/settings/staff");
     return { success: true, message: "Staff deactivated and access revoked" };
@@ -122,7 +101,7 @@ export async function deactivateStaffAction(staffId: string): Promise<{ success:
 
 // ── 3. Reactivate Staff ────────────────────────────────────────────────────
 
-export async function reactivateStaffAction(staffId: string): Promise<{ success: boolean; message: string }> {
+export async function reactivateStaffAction(clerkUserId: string): Promise<{ success: boolean; message: string }> {
   await requireRole(["AGENCY_OWNER"]);
   const session = await getSessionMeta();
   const agencyId = session.agencyId;
@@ -132,25 +111,17 @@ export async function reactivateStaffAction(staffId: string): Promise<{ success:
   }
 
   try {
-    const db = getDb();
-    const [staffRow] = await db
-      .select({ clerkUserId: staff.clerkUserId })
-      .from(staff)
-      .where(and(eq(staff.id, staffId), eq(staff.agencyId, agencyId)));
-
-    if (!staffRow) {
-      return { success: false, message: "Staff not found" };
+    const clerk = await clerkClient();
+    
+    // Verify ownership
+    const user = await clerk.users.getUser(clerkUserId);
+    const meta = user.publicMetadata as Record<string, unknown>;
+    
+    if (meta.agencyId !== agencyId) {
+      return { success: false, message: "Staff not found in your agency" };
     }
 
-    await reactivateStaff(staffId, agencyId);
-
-    // Unban in Clerk
-    try {
-      const clerk = await clerkClient();
-      await clerk.users.unbanUser(staffRow.clerkUserId);
-    } catch {
-      console.warn(`[STAFF] Could not unban Clerk user ${staffRow.clerkUserId}`);
-    }
+    await clerk.users.unbanUser(clerkUserId);
 
     revalidatePath("/admin/settings/staff");
     return { success: true, message: "Staff reactivated" };
@@ -163,7 +134,7 @@ export async function reactivateStaffAction(staffId: string): Promise<{ success:
 // ── 4. Update Assigned Buildings ────────────────────────────────────────────
 
 export async function updateStaffBuildingsAction(
-  staffId: string,
+  clerkUserId: string,
   buildingIds: string[]
 ): Promise<{ success: boolean; message: string }> {
   await requireRole(["AGENCY_OWNER"]);
@@ -174,18 +145,28 @@ export async function updateStaffBuildingsAction(
     return { success: false, message: "No agency associated" };
   }
 
-  // Verify all buildings belong to this agency
-  const db = getDb();
-  const validBuildings = await db
-    .select({ id: buildings.id })
-    .from(buildings)
-    .where(and(eq(buildings.agencyId, agencyId), inArray(buildings.id, buildingIds)));
+  try {
+    const clerk = await clerkClient();
+    
+    // Verify ownership
+    const user = await clerk.users.getUser(clerkUserId);
+    const meta = user.publicMetadata as Record<string, unknown>;
+    
+    if (meta.agencyId !== agencyId) {
+      return { success: false, message: "Staff not found in your agency" };
+    }
 
-  const validIds = validBuildings.map((b) => b.id);
+    await clerk.users.updateUserMetadata(clerkUserId, {
+      publicMetadata: {
+        ...meta,
+        assignedBuildingIds: buildingIds,
+      },
+    });
 
-  await updateStaffBuildings(staffId, agencyId, validIds);
-  revalidatePath("/admin/settings/staff");
-
-  return { success: true, message: "Building assignments updated" };
+    revalidatePath("/admin/settings/staff");
+    return { success: true, message: "Building assignments updated" };
+  } catch (err) {
+    console.error("[STAFF BUILDINGS] Failed:", err);
+    return { success: false, message: "Failed to update building assignments" };
+  }
 }
-

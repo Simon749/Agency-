@@ -864,6 +864,45 @@ body {
 .reveal--d3 { transition-delay: 0.3s; }
 .reveal--d4 { transition-delay: 0.4s; }
 
+
+
+/* ─── Settings Cards ───────────────────────────────────────────────── */
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 28px 24px;
+  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  text-decoration: none;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.settings-card:hover {
+  background-color: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.settings-card__tag {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: rgba(255, 255, 255, 0.35);
+  text-transform: uppercase;
+}
+
+.settings-card__label {
+  font-size: 16px;
+  font-weight: 500;
+  color: #ffffff;
+  letter-spacing: -0.01em;
+}
+
+.settings-card__desc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.4);
+}
+
 /* ─── Responsive ───────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .philosophy__inner {
