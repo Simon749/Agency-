@@ -1,11 +1,9 @@
 // app/api/webhooks/mpesa/[shortcode]/route.ts
-// Handles Daraja STK Push callback — updates pending_transactions + inserts ledger CREDIT
+// Handles Daraja STK Push callback — updates pending_transactions + inserts ledger CREDIT + sends SMS
 
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
-import { getDb } from "@/lib/db";
-import { pendingTransactions, tenantLedger } from "@/db/schema";
 import { getPendingTransaction, updatePendingTransaction, insertPaymentCredit } from "@/lib/ledger";
+import { sendPaymentReceivedSms, sendPaymentFailedSms } from "@/lib/sms/triggers";
 import type { StkCallbackBody } from "@/lib/daraja/types";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ shortcode: string }> }) {
@@ -29,23 +27,30 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sho
             return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
         }
 
+        // ── Payment FAILED ─────────────────────────────────────────────────────
         if (ResultCode !== 0) {
-            // Payment failed
             await updatePendingTransaction(CheckoutRequestID, {
                 status: "FAILED",
                 resultCode: ResultCode.toString(),
                 resultDesc: ResultDesc,
             });
-            return NextResponse.json({ result: "Failed recorded" });
+
+            // Send failure SMS
+            await sendPaymentFailedSms(
+                pendingTx.tenantId,
+                pendingTx.amount,
+                ResultDesc
+            );
+
+            return NextResponse.json({ result: "Failed recorded, SMS sent" });
         }
 
-        // Payment succeeded — extract metadata
+        // ── Payment SUCCEEDED ──────────────────────────────────────────────────
         const metadata = CallbackMetadata?.Item ?? [];
         const mpesaReceiptNumber = metadata.find((i) => i.Name === "MpesaReceiptNumber")?.Value as string | undefined;
-        const transactionDate = metadata.find((i) => i.Name === "TransactionDate")?.Value as string | undefined;
-        const phoneNumber = metadata.find((i) => i.Name === "PhoneNumber")?.Value as string | undefined;
         const amount = metadata.find((i) => i.Name === "Amount")?.Value as number | undefined;
         const billingMonth = new Date().toISOString().slice(0, 7);
+
         // Idempotency: check if already completed
         if (pendingTx.status === "COMPLETED") {
             return NextResponse.json({ result: "Already processed" });
@@ -66,20 +71,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sho
             agencyId: pendingTx.agencyId,
             category: 'RENT',
             amount: amount?.toString() ?? pendingTx.amount,
-            billingMonth,                          // ← derived above
+            billingMonth,
             description: `M-Pesa STK Push — ${mpesaReceiptNumber ?? 'N/A'}`,
             referenceCode: mpesaReceiptNumber ?? CheckoutRequestID,
-            method: 'MPESA_STK',                   // ← was paymentMethod
+            method: 'MPESA_STK',
             recordedBy: 'system',
         });
 
-        // TODO: Trigger SMS notification here (Week 12)
-        // await sendPaymentSms({ phone: pendingTx.phoneNumber, amount, receipt: mpesaReceiptNumber });
+        // Send payment confirmation SMS
+        await sendPaymentReceivedSms(
+            pendingTx.tenantId,
+            amount?.toString() ?? pendingTx.amount,
+            mpesaReceiptNumber ?? CheckoutRequestID,
+            billingMonth
+        );
 
         return NextResponse.json({
             result: "Success",
             ledgerId: ledgerResult.ledgerId,
             alreadyExists: ledgerResult.alreadyExists,
+            smsSent: true,
         });
     } catch (err) {
         console.error(`M-Pesa callback error for shortcode ${shortcode}:`, err);
