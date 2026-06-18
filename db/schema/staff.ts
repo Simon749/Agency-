@@ -1,4 +1,4 @@
-// lib/db/schema/staff.ts
+// db/schema/staff.ts
 // Staff table — links Clerk users to agencies for tracking & assignment.
 // All role/auth checks still use Clerk publicMetadata (fast, middleware-safe).
 // This table is for: hire date, status, assigned buildings, audit trail.

@@ -6,6 +6,8 @@ import { getDb } from "@/lib/db";
 import { tenantLedger, pendingTransactions } from "@/db/schema";
 import type { InsertTenantLedgerEntry } from "@/db/schema";
 
+export { getTenantStatement, getRecentLedgerEntries, type StatementRow, type MonthlyGroup } from "./ledger/getStatement";
+
 export interface BalanceResult {
   totalCharged: number;
   totalPaid: number;

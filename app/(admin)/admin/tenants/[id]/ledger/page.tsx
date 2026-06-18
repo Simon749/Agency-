@@ -5,7 +5,12 @@ import { getDb } from "@/lib/db";
 import { tenants, buildings, units } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getSessionMeta } from "@/lib/auth/getRole";
-import { getTenantStatement, getTenantBalance } from "@/lib/ledger";
+import {
+  getTenantStatement,
+  getTenantBalance,
+  type MonthlyGroup,
+  type StatementRow,
+} from "@/lib/ledger";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 
@@ -104,7 +109,7 @@ export default async function AdminTenantLedgerPage({
             <span className="text-right">Balance</span>
           </div>
 
-          {rows.map((row) => (
+          {rows.map((row: StatementRow) => (
             <div
               key={row.id}
               className={`grid grid-cols-1 md:grid-cols-[100px_1fr_120px_120px_120px_120px] gap-4 px-4 py-4 items-center bg-white/[0.02] border border-white/[0.05] ${
@@ -165,7 +170,7 @@ export default async function AdminTenantLedgerPage({
             Monthly Summary
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-            {monthlyGroups.map((group) => (
+            {monthlyGroups.map((group: MonthlyGroup) => (
               <div
                 key={group.billingMonth}
                 className="bg-white/[0.03] border border-white/[0.07] p-4"

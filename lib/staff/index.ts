@@ -9,13 +9,13 @@ export {
   deactivateStaff,
   reactivateStaff,
   updateStaffBuildings,
-} from "./queries";
+} from "@/lib/staff/queries";
 
-export type { StaffListItem } from "./queries";
+export type { StaffListItem } from "@/lib/staff/queries";
 
 export {
   inviteStaff,
   deactivateStaffAction,
   reactivateStaffAction,
   updateStaffBuildingsAction,
-} from "./actions";
+} from "@/lib/staff/actions";

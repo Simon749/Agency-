@@ -4,6 +4,7 @@
 import { eq, and, inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { staff, agencies } from "@/db/schema";
+import { StaffRole } from "@/db/schema";
 
 export interface StaffListItem {
   id: string;
@@ -11,7 +12,7 @@ export interface StaffListItem {
   fullName: string;
   email: string;
   phone: string;
-  role: "MANAGER" | "FIELD_AGENT";
+  role: StaffRole;
   status: string;
   nationalId: string | null;
   assignedBuildingIds: string[] | null;
@@ -64,7 +65,7 @@ export async function insertStaff(data: {
   fullName: string;
   email: string;
   phone: string;
-  role: "MANAGER" | "FIELD_AGENT";
+  role: StaffRole;
   nationalId?: string;
   assignedBuildingIds?: string[];
 }) {

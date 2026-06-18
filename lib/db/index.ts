@@ -13,6 +13,8 @@ import { Pool } from "pg";
 import * as schema from "@/db/schema";
 import * as relations from "@/db/relations";
 
+
+
 const fullSchema = { ...schema, ...relations };
 
 let instance: ReturnType<typeof drizzle<typeof fullSchema>> | null = null;
@@ -43,6 +45,8 @@ export function getDb() {
 
 export { schema, relations, fullSchema };
 
+ // type exports
+
 // Re-export all table types for easy access
 export type {
   Agency,
@@ -67,4 +71,6 @@ export type {
   InsertComplaint,
   ComplaintUpdate,
   InsertComplaintUpdate,
+  Staff,
+  InsertStaff,
 } from "@/db/schema";

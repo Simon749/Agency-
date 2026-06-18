@@ -81,6 +81,26 @@ export const agencies = pgTable("agencies", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+
+// ── Staff ──────────────────────────────────────────────────────────
+
+export const staff = pgTable("staff", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  clerkUserId: text("clerk_user_id").unique().notNull(),
+  agencyId: uuid("agency_id")
+    .references(() => agencies.id, { onDelete: "cascade" })
+    .notNull(),
+  fullName: text("full_name").notNull(),
+  email: text("email").notNull(),
+  phone: text("phone").notNull(),
+  role: roleEnum("role").notNull(),
+  nationalId: text("national_id"),
+  status: text("status").default("ACTIVE").notNull(),
+  assignedBuildingIds: text("assigned_building_ids").array(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  deactivatedAt: timestamp("deactivated_at"),
+});
+
 // ── Buildings ──────────────────────────────────────────────────────
 
 export const buildings = pgTable("buildings", {
@@ -311,3 +331,7 @@ export type InsertComplaint = typeof complaints.$inferInsert;
 
 export type ComplaintUpdate = typeof complaintUpdates.$inferSelect;
 export type InsertComplaintUpdate = typeof complaintUpdates.$inferInsert;
+
+export type Staff = typeof staff.$inferSelect;
+export type InsertStaff = typeof staff.$inferInsert;
+export type StaffRole = Staff["role"];
