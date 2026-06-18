@@ -1,21 +1,30 @@
-// app/(super-admin)/super-admin/layout.tsx
+// app/(super-admin)/layout.tsx
+// Super Admin layout — dark theme, fixed header, sidebar nav.
+// Mirrors the admin layout aesthetic but with super-admin navigation.
+
 import { redirect } from 'next/navigation';
 import { requireRole } from '@/lib/auth/getRole';
-import SignOutCTA from '@/components/auth/SignOutCTA';
+import SignOutButton from '@/components/auth/SignOutCTA';
 
 export default async function SuperAdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  let session;
   try {
-    await requireRole(['SUPER_ADMIN']);
+    session = await requireRole(['SUPER_ADMIN']);
   } catch (err) {
     if (err instanceof Error && err.message.includes('NEXT_REDIRECT')) {
       throw err;
     }
     redirect('/sign-in');
   }
+
+  const navItems = [
+    { href: '/super-admin/dashboard', label: 'Dashboard' },
+    { href: '/super-admin/agencies', label: 'Agencies' },
+  ];
 
   return (
     <div
@@ -61,9 +70,9 @@ export default async function SuperAdminLayout({
               textTransform: 'uppercase',
             }}
           >
-            Super Admin Console
+            Super Admin
           </span>
-          <SignOutCTA />
+          <SignOutButton />
         </div>
       </header>
 
@@ -75,6 +84,7 @@ export default async function SuperAdminLayout({
           minHeight: '100vh',
         }}
       >
+        {/* Sidebar nav */}
         <aside
           style={{
             width: '220px',
@@ -86,10 +96,12 @@ export default async function SuperAdminLayout({
             gap: '4px',
           }}
         >
-          <NavLink href="/super-admin/dashboard" label="Dashboard" />
-          <NavLink href="/super-admin/agencies" label="Agencies" />
+          {navItems.map((item) => (
+            <NavLink key={item.href} href={item.href} label={item.label} />
+          ))}
         </aside>
 
+        {/* Page content */}
         <main
           style={{
             flex: 1,

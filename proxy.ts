@@ -1,6 +1,12 @@
-// proxy.ts  (or middleware.ts) — root of project
+// middleware.ts — root of project
+// Updated with agency.isActive kill switch for Week 14.
+// Checks agency status on EVERY admin/tenant route hit and redirects to /suspended if inactive.
+
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
+import { getDb } from '@/lib/db';
+import { agencies } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 
 const isSuperAdminRoute = createRouteMatcher(['/super-admin(.*)']);
 const isAdminRoute = createRouteMatcher(['/admin(.*)']);
@@ -12,10 +18,11 @@ const isProtectedRoute = createRouteMatcher([
   '/tenant(.*)',
 ]);
 
-// ✅ Sign-in and marketing page are always public
+// ✅ Sign-in, suspended, and marketing page are always public
 const isPublicRoute = createRouteMatcher([
   '/',
   '/sign-in(.*)',
+  '/suspended',
 ]);
 
 const ROLE_HOME: Record<string, string> = {
@@ -30,8 +37,7 @@ export default clerkMiddleware(async (auth, req) => {
   const { userId, sessionClaims } = await auth();
   const path = req.nextUrl.pathname;
 
-  // 1. Always allow public routes — marketing page and sign-in
-  //    ✅ Fixes: signed-out users being blocked from seeing /
+  // 1. Always allow public routes
   if (isPublicRoute(req)) {
     return NextResponse.next();
   }
@@ -44,14 +50,12 @@ export default clerkMiddleware(async (auth, req) => {
   // 3. Not signed in + any other route → let through
   if (!userId || !sessionClaims) return NextResponse.next();
 
-  // 4. Read role from publicMetadata
-  //    ✅ Requires "publicMetadata": "{{user.public_metadata}}" in Clerk Session Token
+  // 4. Read role and agencyId from publicMetadata
   const meta = (sessionClaims.publicMetadata ?? {}) as Record<string, string>;
   const role = meta.role ?? null;
   const agencyId = meta.agencyId ?? null;
 
-  // 5. Signed-in user on "/" → app/page.tsx handles the role redirect server-side.
-  //    Middleware does NOT redirect here — avoids double-redirect race condition.
+  // 5. Signed-in user on "/" → let app/page.tsx handle redirect server-side
   if (path === '/') {
     return NextResponse.next();
   }
@@ -60,7 +64,6 @@ export default clerkMiddleware(async (auth, req) => {
   if (path.startsWith('/sign-in') && role) {
     return NextResponse.redirect(new URL(ROLE_HOME[role], req.url));
   }
-  // No role = let them reach sign-in even if technically "signed in"
 
   // 7. Super-admin route guard
   if (isSuperAdminRoute(req) && role !== 'SUPER_ADMIN') {
@@ -76,7 +79,7 @@ export default clerkMiddleware(async (auth, req) => {
     );
   }
 
-  // 9. Admin route guard
+  // 9. Admin route guard + KILL SWITCH check
   if (isAdminRoute(req)) {
     const isStaff = ['AGENCY_OWNER', 'MANAGER', 'FIELD_AGENT'].includes(role ?? '');
 
@@ -88,6 +91,26 @@ export default clerkMiddleware(async (auth, req) => {
     if (!agencyId) {
       return NextResponse.redirect(new URL('/pending-setup', req.url));
     }
+
+    // ── KILL SWITCH: Check if agency is active ──────────────────────────────
+    // This runs on EVERY admin route hit. If agency is suspended, redirect immediately.
+    try {
+      const db = getDb();
+      const [agency] = await db
+        .select({ isActive: agencies.isActive })
+        .from(agencies)
+        .where(eq(agencies.id, agencyId));
+
+      if (agency && !agency.isActive) {
+        console.warn(`[KILL SWITCH] Agency ${agencyId} is suspended. User ${userId} blocked from ${path}`);
+        return NextResponse.redirect(new URL('/suspended', req.url));
+      }
+    } catch (err) {
+      // If DB is unreachable, fail open (allow access) to prevent lockout
+      console.error('[KILL SWITCH] DB error checking agency status:', err);
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     if (role === 'FIELD_AGENT' && !isAgentRoute(req)) {
       return NextResponse.redirect(new URL('/admin/agent/meter-readings', req.url));
     }
@@ -98,6 +121,6 @@ export default clerkMiddleware(async (auth, req) => {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };
