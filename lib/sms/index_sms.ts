@@ -5,3 +5,4 @@ export { sendSms, sendBulkSms } from "./sendSms";
 export type { SmsResult } from "./sendSms";
 export * as templates from "./templates";
 export * from "./triggers";
+export * from './subscription-triggers';

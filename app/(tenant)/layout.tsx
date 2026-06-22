@@ -3,7 +3,15 @@ import { auth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { tenants } from "@/db/schema";
+import { ResponsiveNavbar } from "@/components/ResponsiveNavbar";
 import Link from "next/link";
+
+const navItems = [
+  { href: "/tenant/dashboard", label: "Dashboard" },
+  { href: "/tenant/pay", label: "Pay Rent" },
+  { href: "/tenant/lease", label: "My Lease" },
+  { href: "/tenant/complaints", label: "Complaints" },
+];
 
 export default async function TenantLayout({
   children,
@@ -39,32 +47,37 @@ export default async function TenantLayout({
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <nav className="border-b border-white/10 px-4 py-4">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4">
-          <Link href="/tenant/dashboard" className="text-lg font-medium tracking-tight">
-            PropFlow
-          </Link>
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            <Link href="/tenant/dashboard" className="text-white/60 hover:text-white transition">
-              Dashboard
-            </Link>
-            <Link href="/tenant/pay" className="text-white/60 hover:text-white transition">
-              Pay Rent
-            </Link>
-            <Link href="/tenant/lease" className="text-white/60 hover:text-white transition">
-              My Lease
-            </Link>
-            <Link href="/tenant/complaints" className="text-white/60 hover:text-white transition">
-              Complaints
-            </Link>
-            <span className="text-white/40 text-xs truncate max-w-[180px]">
-              {tenant.fullName}
-            </span>
-          </div>
-        </div>
-      </nav>
+      <ResponsiveNavbar
+        role="TENANT"
+        navItems={navItems}
+        userName={tenant.fullName}
+      />
 
-      <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
+      <div className="pt-16">
+        <div className="md:flex">
+          {/* ── Desktop Sidebar ── */}
+          <aside className="hidden w-56 flex-shrink-0 border-r border-white/10 bg-black px-4 py-6 md:block">
+            <div className="flex flex-col gap-1">
+              {navItems.map((item) => (
+                <SidebarLink key={item.href} href={item.href} label={item.label} />
+              ))}
+            </div>
+          </aside>
+
+          <main className="flex-1 px-4 py-6 md:px-8 md:py-10">{children}</main>
+        </div>
+      </div>
     </div>
+  );
+}
+
+function SidebarLink({ href, label }: { href: string; label: string }) {
+  return (
+    <Link
+      href={href}
+      className="block rounded-sm px-4 py-3 text-sm font-medium text-white/70 transition hover:bg-white/5 hover:text-white"
+    >
+      {label}
+    </Link>
   );
 }

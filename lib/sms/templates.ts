@@ -101,3 +101,66 @@ export function paymentFailedSms(data: PaymentFailedData): string {
   const { tenantName, amount, reason } = data;
   return `Hi ${tenantName}, your M-Pesa payment of KES ${amount} failed. Reason: ${reason}. Please try again or contact your agent. —PropFlow`;
 }
+
+
+export function subscriptionDue7DaySms(params: {
+  agencyName: string;
+  amount: number | string;
+  dueDate: string;
+  paybillNumber: string;
+  accountNumber: string;
+}): string {
+  const { agencyName, amount, dueDate, paybillNumber, accountNumber } = params;
+  return `PropFlow: Hi ${agencyName}, your subscription of KES ${amount} is due on ${dueDate}. Pay via M-Pesa Paybill ${paybillNumber}, Acc: ${accountNumber} to avoid service interruption.`;
+}
+
+export function subscriptionDue1DaySms(params: {
+  agencyName: string;
+  amount: number | string;
+  dueDate: string;
+  paybillNumber: string;
+  accountNumber: string;
+}): string {
+  const { agencyName, amount, dueDate, paybillNumber, accountNumber } = params;
+  return `PropFlow URGENT: ${agencyName}, your subscription of KES ${amount} is due TOMORROW (${dueDate}). Pay now: M-Pesa Paybill ${paybillNumber}, Acc: ${accountNumber}.`;
+}
+
+export function subscriptionOverdueSms(params: {
+  agencyName: string;
+  amount: number | string;
+  daysOverdue: number;
+  gracePeriodDays: number;
+  paybillNumber: string;
+  accountNumber: string;
+}): string {
+  const { agencyName, amount, daysOverdue, gracePeriodDays, paybillNumber, accountNumber } = params;
+  return `PropFlow OVERDUE: ${agencyName}, your subscription of KES ${amount} is ${daysOverdue} days overdue. Pay within ${gracePeriodDays} days to avoid suspension: M-Pesa Paybill ${paybillNumber}, Acc: ${accountNumber}.`;
+}
+
+export function subscriptionSuspendedSms(params: {
+  agencyName: string;
+  amount: number | string;
+  daysOverdue: number;
+}): string {
+  const { agencyName, amount, daysOverdue } = params;
+  return `PropFlow: ${agencyName}, your account has been SUSPENDED after ${daysOverdue} days of non-payment (KES ${amount} due). Contact support to reactivate: support@propflow.co.ke`;
+}
+
+export function subscriptionPaymentConfirmedSms(params: {
+  agencyName: string;
+  amount: number | string;
+  paidThroughDate: string;
+  method: string;
+}): string {
+  const { agencyName, amount, paidThroughDate, method } = params;
+  return `PropFlow: Confirmed! ${agencyName}, your payment of KES ${amount} via ${method} has been received. Your subscription is active through ${paidThroughDate}. Thank you!`;
+}
+
+export function trialEndingSms(params: {
+  agencyName: string;
+  trialEndsDate: string;
+  starterAmount: number | string;
+}): string {
+  const { agencyName, trialEndsDate, starterAmount } = params;
+  return `PropFlow: Hi ${agencyName}, your free trial ends on ${trialEndsDate}. Upgrade to Starter (KES ${starterAmount}/mo) to keep your account active. Log in to subscribe.`;
+}

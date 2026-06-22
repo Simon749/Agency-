@@ -68,7 +68,43 @@ export const transactionStatusEnum = pgEnum("transaction_status", [
   "REJECTED",
 ]);
 
-// ── Agencies ───────────────────────────────────────────────────────
+
+// ── NEW: Subscription & Termination Enums ─────────────────────────
+
+export const subscriptionPlanEnum = pgEnum("subscription_plan", [
+  "TRIAL",
+  "STARTER",
+  "GROWTH",
+  "ENTERPRISE",
+]);
+
+export const subscriptionStatusEnum = pgEnum("subscription_status", [
+  "ACTIVE",
+  "OVERDUE",
+  "SUSPENDED",
+  "CANCELLED",
+]);
+
+export const subscriptionPaymentMethodEnum = pgEnum("subscription_payment_method", [
+  "MPESA_PAYBILL",
+  "BANK_TRANSFER",
+  "CASH",
+  "SYSTEM",
+]);
+
+export const subscriptionPaymentStatusEnum = pgEnum("subscription_payment_status", [
+  "PENDING",
+  "CONFIRMED",
+  "REJECTED",
+]);
+
+export const terminationReasonEnum = pgEnum("termination_reason", [
+  "CONTRACT_ENDED",
+  "NON_PAYMENT",
+  "BREACH_OF_TERMS",
+  "REQUESTED_BY_AGENCY",
+  "OTHER",
+]);
 
 export const agencies = pgTable("agencies", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -78,9 +114,16 @@ export const agencies = pgTable("agencies", {
   logoUrl: text("logo_url"),
   isActive: boolean("is_active").default(true).notNull(),
   subscriptionStatus: text("subscription_status").default("TRIAL"),
+
+  // ── Soft delete & termination (NEW) ──────────────────────────────
+  deletedAt: timestamp("deleted_at"),                    // null = active, set = terminated
+  terminationReason: terminationReasonEnum("termination_reason"), // why contract ended
+  terminatedBy: text("terminated_by"),                   // Super Admin clerkUserId
+  dataExportedAt: timestamp("data_exported_at"),          // when archive was generated
+  gracePeriodEndsAt: timestamp("grace_period_ends_at"),  // for subscription grace periods
+
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
-
 
 // ── Staff ──────────────────────────────────────────────────────────
 
@@ -297,6 +340,73 @@ export const complaintUpdates = pgTable("complaint_updates", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+
+// ═══════════════════════════════════════════════════════════════════════
+// NEW: Subscription Management Tables
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── Agency Subscriptions ─────────────────────────────────────────────
+
+export const agencySubscriptions = pgTable("agency_subscriptions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  agencyId: uuid("agency_id")
+    .references(() => agencies.id, { onDelete: "cascade" })
+    .notNull(),
+
+  plan: subscriptionPlanEnum("plan").default("TRIAL").notNull(),
+  amountKes: numeric("amount_kes", { precision: 10, scale: 2 }).notNull(),
+  billingCycle: text("billing_cycle").default("MONTHLY").notNull(),
+
+  status: subscriptionStatusEnum("status").default("ACTIVE").notNull(),
+  paidThroughDate: date("paid_through_date"),
+  nextBillingDate: date("next_billing_date"),
+  trialEndsAt: date("trial_ends_at"),
+
+  paymentMethod: subscriptionPaymentMethodEnum("payment_method").default("MPESA_PAYBILL"),
+  mpesaPaybillNumber: text("mpesa_paybill_number"),
+  mpesaAccountNumber: text("mpesa_account_number"),
+  bankReferencePrefix: text("bank_reference_prefix"),
+
+  gracePeriodDays: numeric("grace_period_days", { precision: 3, scale: 0 }).default("7"),
+  overdueSince: timestamp("overdue_since"),
+
+  reminder7DaySentAt: timestamp("reminder_7_day_sent_at"),
+  reminder1DaySentAt: timestamp("reminder_1_day_sent_at"),
+  overdueNoticeSentAt: timestamp("overdue_notice_sent_at"),
+  suspensionNoticeSentAt: timestamp("suspension_notice_sent_at"),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ── Subscription Payments (Super Admin revenue ledger) ─────────────
+
+export const subscriptionPayments = pgTable("subscription_payments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  agencyId: uuid("agency_id")
+    .references(() => agencies.id, { onDelete: "cascade" })
+    .notNull(),
+  subscriptionId: uuid("subscription_id")
+    .references(() => agencySubscriptions.id, { onDelete: "cascade" }),
+
+  amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
+  method: subscriptionPaymentMethodEnum("method").notNull(),
+  status: subscriptionPaymentStatusEnum("status").default("PENDING").notNull(),
+  referenceCode: text("reference_code"),
+
+  recordedBy: text("recorded_by"),
+  receiptUrl: text("receipt_url"),
+  notes: text("notes"),
+
+  billingPeriodStart: date("billing_period_start"),
+  billingPeriodEnd: date("billing_period_end"),
+
+  confirmedAt: timestamp("confirmed_at"),
+  confirmedBy: text("confirmed_by"),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // ── Type Exports ───────────────────────────────────────────────────
 
 export type Agency = typeof agencies.$inferSelect;
@@ -335,3 +445,10 @@ export type InsertComplaintUpdate = typeof complaintUpdates.$inferInsert;
 export type Staff = typeof staff.$inferSelect;
 export type InsertStaff = typeof staff.$inferInsert;
 export type StaffRole = Staff["role"];
+
+// NEW type exports
+export type AgencySubscription = typeof agencySubscriptions.$inferSelect;
+export type InsertAgencySubscription = typeof agencySubscriptions.$inferInsert;
+
+export type SubscriptionPayment = typeof subscriptionPayments.$inferSelect;
+export type InsertSubscriptionPayment = typeof subscriptionPayments.$inferInsert;
