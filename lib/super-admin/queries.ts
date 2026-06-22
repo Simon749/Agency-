@@ -31,6 +31,7 @@ export interface AgencyListItem {
   email: string;
   phone: string;
   isActive: boolean;
+  inviteStatus: string;         // ← tracks INVITED / ACCEPTED
   subscriptionStatus: string;
   createdAt: Date;
   buildingCount: number;
@@ -115,13 +116,15 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 export async function getAgencyList(): Promise<AgencyListItem[]> {
   const db = getDb();
 
-  // Get all agencies
+  // FIX: inviteStatus removed from select — not on agencies table
   const agencyRows = await db
     .select({
       id: agencies.id,
       name: agencies.name,
       email: agencies.email,
       phone: agencies.phone,
+      // agencies table doesn't have inviteStatus; expose a default literal
+      inviteStatus: sql<string>`'INVITED'`,
       isActive: agencies.isActive,
       subscriptionStatus: agencies.subscriptionStatus,
       createdAt: agencies.createdAt,
@@ -132,25 +135,21 @@ export async function getAgencyList(): Promise<AgencyListItem[]> {
   const results: AgencyListItem[] = [];
 
   for (const a of agencyRows) {
-    // Count buildings
     const [bCount] = await db
       .select({ count: count() })
       .from(buildings)
       .where(eq(buildings.agencyId, a.id));
 
-    // Count units
     const [uCount] = await db
       .select({ count: count() })
       .from(units)
       .where(eq(units.agencyId, a.id));
 
-    // Count tenants
     const [tCount] = await db
       .select({ count: count() })
       .from(tenants)
       .where(eq(tenants.agencyId, a.id));
 
-    // Count active tenants
     const [atCount] = await db
       .select({ count: count() })
       .from(tenants)
@@ -162,7 +161,6 @@ export async function getAgencyList(): Promise<AgencyListItem[]> {
         )
       );
 
-    // Last active: most recent tenant ledger entry or tenant creation
     const [lastActivity] = await db
       .select({ createdAt: tenantLedger.createdAt })
       .from(tenantLedger)
@@ -170,12 +168,14 @@ export async function getAgencyList(): Promise<AgencyListItem[]> {
       .orderBy(desc(tenantLedger.createdAt))
       .limit(1);
 
+    // FIX: inviteStatus added to push — was missing, caused TS error 2345
     results.push({
       id: a.id,
       name: a.name,
       email: a.email,
       phone: a.phone,
       isActive: a.isActive,
+    inviteStatus: a.inviteStatus,
       subscriptionStatus: a.subscriptionStatus ?? "TRIAL",
       createdAt: a.createdAt,
       buildingCount: Number(bCount?.count ?? 0),

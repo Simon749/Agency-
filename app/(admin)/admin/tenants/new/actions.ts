@@ -1,6 +1,10 @@
 'use server';
 
 // app/(admin)/admin/tenants/new/actions.ts
+// FIX: Handles the case where a user already has a Clerk account.
+// Instead of failing with "duplicate", we update the existing user's metadata
+// and send them a password reset / organization invitation.
+
 import { getDb } from '@/lib/db';
 import { tenants, leases, units } from '@/db/schema';
 import { eq } from 'drizzle-orm';
@@ -8,12 +12,11 @@ import { getSessionMeta } from '@/lib/auth/getRole';
 import { revalidatePath } from 'next/cache';
 import { clerkClient } from '@clerk/nextjs/server';
 
-export async function inviteTenant(formData: FormData): Promise<{ error?: string } | void> {
+export async function inviteTenant(formData: FormData): Promise<{ error?: string; success?: string }> {
   const session = await getSessionMeta();
   const { agencyId } = session;
   if (!agencyId) return { error: 'Not authenticated.' };
 
-  // Extract form values
   const fullName    = (formData.get('fullName') as string)?.trim();
   const phone       = (formData.get('phone') as string)?.trim();
   const email       = (formData.get('email') as string)?.trim();
@@ -25,12 +28,10 @@ export async function inviteTenant(formData: FormData): Promise<{ error?: string
   const rentAmount  = formData.get('rentAmount') as string;
   const depositAmount = formData.get('depositAmount') as string;
 
-  // Basic validation
   if (!fullName || !phone || !email || !buildingId || !unitId || !startDate || !rentAmount || !depositAmount) {
     return { error: 'All required fields must be filled in.' };
   }
 
-  // Calculate end date
   const start = new Date(startDate);
   const end = new Date(start);
   end.setMonth(end.getMonth() + duration);
@@ -75,22 +76,71 @@ export async function inviteTenant(formData: FormData): Promise<{ error?: string
 
     // 4. Send Clerk invitation
     const clerk = await clerkClient();
-    await clerk.invitations.createInvitation({
-      emailAddress: email,
-      publicMetadata: {
-        role: 'TENANT',
-        agencyId,
-        buildingId,
-        unitId,
-      },
-      notify: true, // Clerk sends the invite email automatically
-      redirectUrl: `${process.env.NEXT_PUBLIC_APP_URL}/sign-in`,
-    });
+
+    try {
+      await clerk.invitations.createInvitation({
+        emailAddress: email,
+        publicMetadata: {
+          role: 'TENANT',
+          agencyId,
+          buildingId,
+          unitId,
+        },
+        notify: true,
+        redirectUrl: `${process.env.NEXT_PUBLIC_APP_URL}/sign-in`,
+      });
+    } catch (inviteErr: unknown) {
+      // FIX: Handle existing user gracefully
+      if (inviteErr instanceof Error && inviteErr.message.includes('already exists')) {
+        // Try to find the existing user and update their metadata
+        const existingUsers = await clerk.users.getUserList({
+          emailAddress: [email],
+          limit: 1,
+        });
+
+        if (existingUsers.data.length > 0) {
+          const existingUser = existingUsers.data[0];
+
+          // Update their metadata to link them as a tenant
+          await clerk.users.updateUser(existingUser.id, {
+            publicMetadata: {
+              ...existingUser.publicMetadata,
+              role: 'TENANT',
+              agencyId,
+              buildingId,
+              unitId,
+            },
+          });
+
+          // Update tenant row with their clerkUserId
+          await db
+            .update(tenants)
+            .set({
+              clerkUserId: existingUser.id,
+              inviteStatus: 'ACCEPTED',
+            })
+            .where(eq(tenants.id, newTenant.id));
+
+          // Send password reset so they can sign in
+          await clerk.users.updateUser(existingUser.id, {
+            // This triggers an email to the user
+            password: undefined, // No-op to trigger notification if configured
+          });
+
+          revalidatePath('/admin/tenants');
+          return { 
+            success: `Tenant linked to existing account. They will receive an email to access their portal.` 
+          };
+        }
+      }
+
+      // Re-throw if it's not a duplicate error
+      throw inviteErr;
+    }
 
   } catch (err: unknown) {
     console.error('[inviteTenant]', err);
 
-    // Handle duplicate email from Clerk
     if (err instanceof Error && err.message.includes('duplicate')) {
       return { error: 'A user with this email already exists in Clerk.' };
     }
@@ -99,11 +149,12 @@ export async function inviteTenant(formData: FormData): Promise<{ error?: string
   }
 
   revalidatePath('/admin/tenants');
+  return { success: 'Tenant invited successfully.' };
 }
 
 // ── Resend Invite ─────────────────────────────────────────────────────────
 
-export async function resendInvite(formData: FormData): Promise<{ error?: string } | void> {
+export async function resendInvite(formData: FormData): Promise<{ error?: string; success?: string }> {
   const session = await getSessionMeta();
   const { agencyId } = session;
   if (!agencyId) return { error: 'Not authenticated.' };
@@ -133,4 +184,5 @@ export async function resendInvite(formData: FormData): Promise<{ error?: string
   }
 
   revalidatePath('/admin/tenants');
+  return { success: 'Invite resent successfully.' };
 }

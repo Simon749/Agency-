@@ -5,7 +5,7 @@ dotenv.config({ path: '.env.local' });
 
 export default defineConfig({
   // This pattern looks inside db/ and any subfolders for .ts files
-  schema: './db/schema/**/*.ts', 
+  schema: './db/schema.ts',
   out: './db/migrations', // Matches your existing migrations folder
   dialect: 'postgresql',
   dbCredentials: {

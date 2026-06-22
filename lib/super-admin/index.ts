@@ -12,4 +12,9 @@ export type {
   AgencyListItem,
 } from "./queries";
 
-export { toggleAgencyStatus as toggleAgencyStatusAction } from "./actions";
+export {
+  toggleAgencyStatus as toggleAgencyStatusAction,
+  createAgencyAndInviteOwner,
+} from "./actions";
+
+export type { CreateAgencyResult } from "./actions";

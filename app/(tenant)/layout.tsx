@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+﻿import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
@@ -22,7 +22,7 @@ export default async function TenantLayout({
 
   if (!tenant) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+      <div className="min-h-screen bg-black text-white flex items-center justify-center px-4">
         <div className="text-center p-8">
           <h1 className="text-2xl font-bold mb-4">Welcome to PropFlow</h1>
           <p className="text-gray-400 mb-6">
@@ -33,46 +33,38 @@ export default async function TenantLayout({
     );
   }
 
+  if (tenant.status !== "ACTIVE") {
+    redirect("/deactivated");
+  }
+
   return (
     <div className="min-h-screen bg-black text-white">
-      <nav className="border-b border-white/10 px-6 py-4">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
+      <nav className="border-b border-white/10 px-4 py-4">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4">
           <Link href="/tenant/dashboard" className="text-lg font-medium tracking-tight">
             PropFlow
           </Link>
-          <div className="flex items-center gap-6 text-sm">
-            <Link
-              href="/tenant/dashboard"
-              className="text-white/60 hover:text-white transition"
-            >
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <Link href="/tenant/dashboard" className="text-white/60 hover:text-white transition">
               Dashboard
             </Link>
-            <Link
-              href="/tenant/pay"
-              className="text-white/60 hover:text-white transition"
-            >
+            <Link href="/tenant/pay" className="text-white/60 hover:text-white transition">
               Pay Rent
             </Link>
-            <Link
-              href="/tenant/lease"
-              className="text-white/60 hover:text-white transition"
-            >
+            <Link href="/tenant/lease" className="text-white/60 hover:text-white transition">
               My Lease
             </Link>
-            <Link
-              href="/tenant/complaints"
-              className="text-white/60 hover:text-white transition"
-            >
+            <Link href="/tenant/complaints" className="text-white/60 hover:text-white transition">
               Complaints
             </Link>
-            <span className="text-white/40 text-xs">
+            <span className="text-white/40 text-xs truncate max-w-[180px]">
               {tenant.fullName}
             </span>
           </div>
         </div>
       </nav>
 
-      <main className="max-w-5xl mx-auto px-6 py-8">{children}</main>
+      <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
     </div>
   );
 }

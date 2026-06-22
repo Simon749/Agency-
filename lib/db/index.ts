@@ -1,19 +1,15 @@
 /**
  * PropFlow Database Client
  *
- * This module exports a typed Drizzle ORM instance for PostgreSQL.
- * Use this for all database queries in Server Actions and API routes.
- *
- * The `db` instance is lazy-initialized on first call to `getDb()`.
- * All PropFlow tables are registered in the schema for type-safe queries.
+ * FIX: Added proper connection pool settings.
+ * Previously the pool had no limits, causing slow cold connections
+ * and unbounded pool growth under load.
  */
 
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
-import * as schema from "@/db/schema";
-import * as relations from "@/db/relations";
-
-
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+import * as schema from '@/db/schema';
+import * as relations from '@/db/relations';
 
 const fullSchema = { ...schema, ...relations };
 
@@ -23,17 +19,26 @@ export function getDb() {
   if (!instance) {
     const databaseUrl = process.env.DATABASE_URL;
     if (!databaseUrl) {
-      throw new Error(
-        "DATABASE_URL is not set. Please configure it in your .env file.",
-      );
+      throw new Error('DATABASE_URL is not set. Please configure it in your .env file.');
     }
 
     const pool = new Pool({
       connectionString: databaseUrl,
-      ssl:
-        process.env.NODE_ENV === "production"
-          ? { rejectUnauthorized: false }
-          : undefined,
+
+      // ── Pool tuning (FIX) ────────────────────────────────────────────────
+      max: 10,                    // max open connections (default was unlimited)
+      idleTimeoutMillis: 30_000,  // close idle connections after 30s
+      connectionTimeoutMillis: 5_000, // fail fast if can't get a connection in 5s
+
+      // ── SSL (FIX: use verify-full to silence the deprecation warning) ────
+      ssl: process.env.NODE_ENV === 'production'
+        ? { rejectUnauthorized: true }  // verify-full equivalent
+        : undefined,
+    });
+
+    // Log pool errors so they don't silently swallow exceptions
+    pool.on('error', (err) => {
+      console.error('[DB Pool] Unexpected error on idle client:', err);
     });
 
     instance = drizzle(pool, { schema: fullSchema });
@@ -42,12 +47,8 @@ export function getDb() {
 }
 
 // ── Convenience exports ────────────────────────────────────────────
-
 export { schema, relations, fullSchema };
 
- // type exports
-
-// Re-export all table types for easy access
 export type {
   Agency,
   InsertAgency,
@@ -73,4 +74,4 @@ export type {
   InsertComplaintUpdate,
   Staff,
   InsertStaff,
-} from "@/db/schema";
+} from '@/db/schema';

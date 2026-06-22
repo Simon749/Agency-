@@ -1,11 +1,10 @@
-// app/(admin)/admin/layout.tsx
-// Updated for Week 15: added Staff link (AGENCY_OWNER only), Arrears for Field Agent.
+﻿// app/(admin)/layout.tsx
+// FIX: Removed the DB query for agency name — the dashboard page already
+// fetches it. The layout only needs role/auth, not agency data.
+// This eliminates one DB round-trip on every single /admin/* page load.
 
 import { redirect } from 'next/navigation';
 import { requireRole } from '@/lib/auth/getRole';
-import { getDb } from '@/lib/db';
-import { agencies } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import SignOutButton from '@/components/auth/SignOutCTA';
 
 export default async function AdminLayout({
@@ -17,24 +16,11 @@ export default async function AdminLayout({
   try {
     session = await requireRole(['AGENCY_OWNER', 'MANAGER', 'FIELD_AGENT']);
   } catch (err) {
-    if (err instanceof Error && err.message.includes('NEXT_REDIRECT')) {
-      throw err;
-    }
+    if (err instanceof Error && err.message.includes('NEXT_REDIRECT')) throw err;
     redirect('/sign-in');
   }
 
-  const { role, agencyId } = session;
-  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-  let agencyName = 'Agency';
-  if (agencyId && UUID_REGEX.test(agencyId)) {
-    const db = getDb();
-    const [agency] = await db
-      .select({ name: agencies.name })
-      .from(agencies)
-      .where(eq(agencies.id, agencyId));
-    if (agency) agencyName = agency.name;
-  }
+  const { role } = session;
 
   const navItems: { href: string; label: string; roles: string[] }[] = [
     { href: '/admin/dashboard', label: 'Dashboard', roles: ['AGENCY_OWNER', 'MANAGER'] },
@@ -51,90 +37,44 @@ export default async function AdminLayout({
   const visibleNav = navItems.filter((item) => item.roles.includes(role!));
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        backgroundColor: '#0b0b0b',
-        fontFamily: '"Helvetica Neue", sans-serif',
-      }}
-    >
-      {/* Top bar */}
-      <header
-        style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100%',
-          height: '64px',
-          backgroundColor: '#0b0b0b',
-          borderBottom: '1px solid rgba(255,255,255,0.12)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 clamp(20px, 4vw, 48px)',
-          zIndex: 100,
-        }}
-      >
-        <span
-          style={{
-            fontSize: '15px',
-            fontWeight: 500,
-            letterSpacing: '0.2em',
-            color: '#ffffff',
-          }}
-        >
-          PROPFLOW
-        </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-          <span
-            style={{
-              fontSize: '11px',
-              letterSpacing: '0.18em',
-              color: 'rgba(255,255,255,0.45)',
-              textTransform: 'uppercase',
-            }}
-          >
-            {agencyName} — {role?.replace('_', ' ')}
-          </span>
-          <SignOutButton />
+    <div className="min-h-screen bg-slate-950 text-white">
+      <header className="fixed inset-x-0 top-0 z-40 border-b border-white/10 bg-slate-950/95 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
+          <div className="flex items-center gap-4">
+            <span className="text-sm font-semibold tracking-[0.35em] uppercase">PROPFLOW</span>
+            <span className="hidden text-xs uppercase tracking-[0.18em] text-white/60 md:inline-flex">
+              {role?.replace('_', ' ')}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs uppercase tracking-[0.18em] text-white/60 md:hidden">
+              {role?.replace('_', ' ')}
+            </span>
+            <SignOutButton />
+          </div>
         </div>
       </header>
 
-      {/* Sidebar + content */}
-      <div
-        style={{
-          display: 'flex',
-          paddingTop: '64px',
-          minHeight: '100vh',
-        }}
-      >
-        {/* Sidebar nav */}
-        <aside
-          style={{
-            width: '220px',
-            flexShrink: 0,
-            borderRight: '1px solid rgba(255,255,255,0.1)',
-            padding: '40px 0',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '4px',
-          }}
-        >
-          {visibleNav.map((item) => (
-            <NavLink key={item.href} href={item.href} label={item.label} />
-          ))}
-        </aside>
+      <div className="pt-16">
+        <div className="md:flex">
+          <aside className="hidden w-56 flex-shrink-0 border-r border-white/10 bg-slate-950/95 px-4 py-6 md:block">
+            <div className="flex flex-col gap-1">
+              {visibleNav.map((item) => (
+                <NavLink key={item.href} href={item.href} label={item.label} />
+              ))}
+            </div>
+          </aside>
 
-        {/* Page content */}
-        <main
-          style={{
-            flex: 1,
-            padding: 'clamp(32px, 4vw, 56px) clamp(24px, 4vw, 56px)',
-            color: '#ffffff',
-          }}
-        >
-          {children}
-        </main>
+          <div className="md:hidden border-b border-white/10 bg-slate-950/95 px-4 py-3">
+            <nav className="flex flex-wrap items-center gap-2">
+              {visibleNav.map((item) => (
+                <NavLink key={item.href} href={item.href} label={item.label} />
+              ))}
+            </nav>
+          </div>
+
+          <main className="flex-1 px-4 py-6 md:px-8 md:py-10">{children}</main>
+        </div>
       </div>
     </div>
   );
@@ -144,14 +84,7 @@ function NavLink({ href, label }: { href: string; label: string }) {
   return (
     <a
       href={href}
-      style={{
-        display: 'block',
-        padding: '10px 28px',
-        fontSize: '13px',
-        letterSpacing: '0.06em',
-        color: 'rgba(255,255,255,0.65)',
-        textDecoration: 'none',
-      }}
+      className="block rounded-lg px-4 py-3 text-sm font-medium text-white/70 transition hover:bg-white/5 hover:text-white"
     >
       {label}
     </a>

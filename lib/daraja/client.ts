@@ -1,9 +1,10 @@
 // lib/daraja/client.ts
 // Safaricom Daraja API client for STK Push and Access Tokens
+// FIX: Added idempotency check before initiating STK Push to prevent duplicate charges.
 
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { buildings } from "@/db/schema";
+import { buildings, pendingTransactions } from "@/db/schema";
 import { decrypt } from "@/lib/encryption";
 import {
   generatePassword,
@@ -71,6 +72,10 @@ export interface InitiateStkPushParams {
 
 /**
  * Initiate an STK Push to the tenant's phone.
+ * 
+ * FIX: Idempotency guard — checks for an existing PENDING transaction for this
+ * tenant within the last 5 minutes before calling Daraja. Prevents duplicate
+ * STK Push prompts when the tenant double-clicks the Pay button.
  */
 export async function initiateStkPush(
   params: InitiateStkPushParams
@@ -79,6 +84,35 @@ export async function initiateStkPush(
     params;
 
   const db = getDb();
+
+  // ── IDEMPOTENCY GUARD ──
+  // Check if there's a recent PENDING transaction for this tenant.
+  // If found within the last 5 minutes, reject the duplicate request.
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+  const [recentPending] = await db
+    .select({
+      checkoutRequestId: pendingTransactions.checkoutRequestId,
+      createdAt: pendingTransactions.createdAt,
+      amount: pendingTransactions.amount,
+    })
+    .from(pendingTransactions)
+    .where(
+      and(
+        eq(pendingTransactions.tenantId, tenantId),
+        eq(pendingTransactions.status, "PENDING"),
+        eq(pendingTransactions.buildingId, buildingId)
+      )
+    )
+    .orderBy(pendingTransactions.createdAt) // oldest first
+    .limit(1);
+
+  if (recentPending && new Date(recentPending.createdAt) > fiveMinutesAgo) {
+    throw new Error(
+      `An STK Push is already pending for this tenant (started ${recentPending.checkoutRequestId}). ` +
+      `Please wait for the M-Pesa prompt to complete or expire before trying again.`
+    );
+  }
+
   const [building] = await db
     .select({
       shortcode: buildings.darajaShortcode,

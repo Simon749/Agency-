@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import Providers from "./providers";
+import { Toaster } from "@/components/ui/toaster";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -32,7 +33,20 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <body className="h-full" suppressHydrationWarning>
-          <Providers>{children}</Providers>
+          <Providers>
+            {children}
+            <Toaster 
+              position="bottom-right"
+              toastOptions={{
+                style: {
+                  background: 'rgba(20, 20, 20, 0.95)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  color: '#ffffff',
+                  borderRadius: '0',
+                },
+              }}
+            />
+          </Providers>
         </body>
       </html>
     </ClerkProvider>
