@@ -1,10 +1,12 @@
 ﻿import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { auth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { tenants } from "@/db/schema";
 import { ResponsiveNavbar } from "@/components/ResponsiveNavbar";
 import Link from "next/link";
+import Loading from "@/app/loading";
 
 const navItems = [
   { href: "/tenant/dashboard", label: "Dashboard" },
@@ -18,6 +20,16 @@ export default async function TenantLayout({
 }: {
   children: React.ReactNode;
 }) {
+  return (
+    <div className="min-h-screen bg-black text-white">
+      <Suspense fallback={<Loading />}>
+        <LayoutContent>{children}</LayoutContent>
+      </Suspense>
+    </div>
+  );
+}
+
+async function LayoutContent({ children }: { children: React.ReactNode }) {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
@@ -46,7 +58,7 @@ export default async function TenantLayout({
   }
 
   return (
-    <div className="min-h-screen bg-black text-white">
+    <>
       <ResponsiveNavbar
         role="TENANT"
         navItems={navItems}
@@ -55,7 +67,7 @@ export default async function TenantLayout({
 
       <div className="pt-16">
         <div className="md:flex">
-          {/* ── Desktop Sidebar ── */}
+          {/* Desktop Sidebar */}
           <aside className="hidden w-56 flex-shrink-0 border-r border-white/10 bg-black px-4 py-6 md:block">
             <div className="flex flex-col gap-1">
               {navItems.map((item) => (
@@ -67,7 +79,7 @@ export default async function TenantLayout({
           <main className="flex-1 px-4 py-6 md:px-8 md:py-10">{children}</main>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

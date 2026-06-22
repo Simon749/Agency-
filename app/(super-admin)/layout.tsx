@@ -1,7 +1,9 @@
 ﻿import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { requireRole } from "@/lib/auth/getRole";
 import { ResponsiveNavbar } from "@/components/ResponsiveNavbar";
 import Link from "next/link";
+import Loading from "@/app/loading";
 
 const navItems = [
   { href: "/super-admin/dashboard", label: "Dashboard" },
@@ -11,6 +13,22 @@ const navItems = [
 export default async function SuperAdminLayout({
   children,
 }: {
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="min-h-screen bg-slate-950 text-white">
+      <Suspense fallback={<Loading />}>
+        <LayoutContent navItems={navItems}>{children}</LayoutContent>
+      </Suspense>
+    </div>
+  );
+}
+
+async function LayoutContent({
+  navItems,
+  children,
+}: {
+  navItems: { href: string; label: string }[];
   children: React.ReactNode;
 }) {
   let session;
@@ -24,12 +42,12 @@ export default async function SuperAdminLayout({
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <>
       <ResponsiveNavbar role="SUPER_ADMIN" navItems={navItems} />
 
       <div className="pt-16">
         <div className="md:flex">
-          {/* ── Desktop Sidebar ── */}
+          {/* Desktop Sidebar */}
           <aside className="hidden w-56 flex-shrink-0 border-r border-white/10 bg-slate-950/95 px-4 py-6 md:block">
             <div className="flex flex-col gap-1">
               {navItems.map((item) => (
@@ -41,7 +59,7 @@ export default async function SuperAdminLayout({
           <main className="flex-1 px-4 py-6 md:px-8 md:py-10">{children}</main>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
