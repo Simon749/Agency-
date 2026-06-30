@@ -7,7 +7,13 @@ import { redirect, notFound } from 'next/navigation';
 import { ResendInviteButton } from './resend-button';
 import { LedgerSummary } from '@/components/ledger/page';
 
-export default async function TenantDetailPage({ params }: { params: { id: string } }) {
+export default async function TenantDetailPage({ 
+  params 
+}: { 
+  params: Promise<{ id: string }> 
+}) {
+  const { id } = await params; // ← FIX: unwrap params Promise
+  
   const session = await getSessionMeta();
   const { agencyId } = session;
   if (!agencyId) redirect('/pending-setup');
@@ -18,7 +24,7 @@ export default async function TenantDetailPage({ params }: { params: { id: strin
   const [tenant] = await db
     .select()
     .from(tenants)
-    .where(and(eq(tenants.id, params.id), eq(tenants.agencyId, agencyId)));
+    .where(and(eq(tenants.id, id), eq(tenants.agencyId, agencyId))); // ← use unwrapped id
 
   if (!tenant) notFound();
 

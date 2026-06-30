@@ -22,7 +22,7 @@ export const tenantLedger = pgTable("tenant_ledger", {
   billingMonth: text("billing_month").notNull(), // "2025-01" format
   description: text("description"),
   referenceCode: text("reference_code"), // M-Pesa TransactionID or manual receipt ref
-  paymentMethod: paymentMethodEnum("payment_method"),
+  method: paymentMethodEnum("method").default("SYSTEM"),  // ← was "payment_method"
   recordedBy: text("recorded_by"), // Clerk user ID of staff who logged it
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
