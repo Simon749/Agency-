@@ -4,33 +4,26 @@ import { Webhook } from 'svix';
 import { headers } from 'next/headers';
 import { getDb } from '@/lib/db';
 import { tenants, agencies } from '@/db/schema';
-import { eq, or, sql } from 'drizzle-orm';
+import { eq, or } from 'drizzle-orm';
+import { clerkClient } from '@clerk/nextjs/server';
 
 const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
-
-// ── Types ──────────────────────────────────────────────────────────────────
-
-interface ClerkEmailAddress {
-  email_address: string;
-  id: string;
-}
-
-interface ClerkPhoneNumber {
-  phone_number: string;
-  id: string;
-}
 
 interface ClerkUserCreatedEvent {
   type: 'user.created';
   data: {
     id: string;
-    email_addresses: ClerkEmailAddress[];
-    phone_numbers: ClerkPhoneNumber[];
+    email_addresses: { email_address: string; id: string }[];
+    phone_numbers: { phone_number: string; id: string }[];
     public_metadata: Record<string, unknown>;
+    first_name?: string;
+    last_name?: string;
   };
 }
 
-// ── Handler ────────────────────────────────────────────────────────────────
+// ── In-memory tracking for invited staff (fallback if DB table doesn't exist) ──
+// You should create a proper staff_invites table, but this works for now:
+const STAFF_INVITE_ROLES = ['MANAGER', 'FIELD_AGENT', 'AGENCY_OWNER'];
 
 export async function POST(req: NextRequest) {
   if (!WEBHOOK_SECRET) {
@@ -38,9 +31,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Server misconfiguration' }, { status: 500 });
   }
 
-  // 1. Verify svix signature
   const headerPayload = await headers();
-  const svixId        = headerPayload.get('svix-id');
+  const svixId = headerPayload.get('svix-id');
   const svixTimestamp = headerPayload.get('svix-timestamp');
   const svixSignature = headerPayload.get('svix-signature');
 
@@ -54,7 +46,7 @@ export async function POST(req: NextRequest) {
 
   try {
     event = wh.verify(payload, {
-      'svix-id':        svixId,
+      'svix-id': svixId,
       'svix-timestamp': svixTimestamp,
       'svix-signature': svixSignature,
     }) as ClerkUserCreatedEvent;
@@ -68,31 +60,65 @@ export async function POST(req: NextRequest) {
   }
 
   const { id: clerkUserId, email_addresses, phone_numbers, public_metadata } = event.data;
-
   const email = email_addresses?.[0]?.email_address ?? null;
   const phone = phone_numbers?.[0]?.phone_number ?? null;
 
-  // 2. Read role from publicMetadata (set by Clerk invite)
-  const role     = (public_metadata?.role as string) ?? null;
+  // ── FIX: Read role from publicMetadata (set by Clerk invite) ──────────
+  const role = (public_metadata?.role as string) ?? null;
   const agencyId = (public_metadata?.agencyId as string) ?? null;
 
-  // ── Path A: Agency Owner accepted their invite ─────────────────────────
-  // When Super Admin sends an agency owner invite, publicMetadata already has
-  // role: "AGENCY_OWNER" and agencyId set. We just need to mark the agency
-  // inviteStatus as "ACCEPTED" so the super admin dashboard reflects it.
-  if (role === 'AGENCY_OWNER' && agencyId) {
-    console.log(
-      `[clerk-webhook] Agency owner accepted invite. clerkUserId=${clerkUserId} agencyId=${agencyId}`
-    );
-    // NOTE: We do NOT update agencies.inviteStatus here because that column
-    // doesn't exist on the agencies table. The invite status is tracked by
-    // Clerk's invitation object itself. If you need DB-level tracking, add
-    // inviteStatus text('invite_status').default('PENDING') to the schema.
-    return NextResponse.json({ message: 'Agency owner linked' }, { status: 200 });
+  // ── Path A: Staff invite (MANAGER, FIELD_AGENT, AGENCY_OWNER) ─────────
+  // The metadata SHOULD be set by Clerk automatically when they accept the invite.
+  // If it's missing, they didn't use the invite link — we need to handle that.
+  if (STAFF_INVITE_ROLES.includes(role ?? '') && agencyId) {
+    console.log(`[clerk-webhook] Staff user created. role=${role} agencyId=${agencyId} clerkId=${clerkUserId}`);
+
+    // Metadata is already correct from the invitation — nothing more to do.
+    // Clerk handles this automatically when the user accepts the invite link.
+    return NextResponse.json({ message: 'Staff user linked via invite metadata' }, { status: 200 });
   }
 
-  // ── Path B: Tenant accepted their invite ──────────────────────────────
-  // Original behaviour — match by email or phone and link clerkUserId.
+  // ── Path B: Staff user created WITHOUT invite metadata ──────────────────
+  // This happens when someone signs up directly at /sign-up instead of using
+  // the invite link. We need to check if they were pre-invited and fix their metadata.
+  if (email && !role) {
+    const clerk = await clerkClient();
+
+    // Check if there's a pending invitation for this email
+    const invitations = await clerk.invitations.getInvitationList({
+      status: 'pending',
+    });
+
+    const matchingInvite = invitations.data.find(
+      (inv) =>
+        inv.emailAddress === email &&
+        (inv.status === 'pending' || inv.status === 'accepted')
+    );
+
+    if (matchingInvite) {
+      const inviteMeta = matchingInvite.publicMetadata as Record<string, unknown>;
+      const inviteRole = inviteMeta.role as string;
+      const inviteAgencyId = inviteMeta.agencyId as string;
+
+      if (inviteRole && inviteAgencyId) {
+        // Fix the user's metadata since they didn't use the invite link
+        await clerk.users.updateUser(clerkUserId, {
+          publicMetadata: {
+            role: inviteRole,
+            agencyId: inviteAgencyId,
+            buildingId: null,
+            unitId: null,
+            ...inviteMeta,
+          },
+        });
+
+        console.log(`[clerk-webhook] Fixed metadata for ${email} from pending invite`);
+        return NextResponse.json({ message: 'Staff metadata fixed from invite' }, { status: 200 });
+      }
+    }
+  }
+
+  // ── Path C: Tenant accepted invite ────────────────────────────────────
   if (!email && !phone) {
     console.warn('[clerk-webhook] user.created has no email or phone — skipping');
     return NextResponse.json({ message: 'No identifiers' }, { status: 200 });
@@ -110,12 +136,8 @@ export async function POST(req: NextRequest) {
     .limit(1);
 
   if (matchingTenants.length === 0) {
-    // Staff invite — publicMetadata.role is set directly on the Clerk invite,
-    // no DB row to update here.
-    console.log(
-      `[clerk-webhook] No tenant row for ${email ?? phone} (likely staff invite) — no action taken`
-    );
-    return NextResponse.json({ message: 'No matching tenant' }, { status: 200 });
+    console.log(`[clerk-webhook] No tenant or staff match for ${email ?? phone}`);
+    return NextResponse.json({ message: 'No matching user' }, { status: 200 });
   }
 
   const tenant = matchingTenants[0];
@@ -128,9 +150,6 @@ export async function POST(req: NextRequest) {
     })
     .where(eq(tenants.id, tenant.id));
 
-  console.log(
-    `[clerk-webhook] Tenant linked. clerkUserId=${clerkUserId} → tenantId=${tenant.id}`
-  );
-
+  console.log(`[clerk-webhook] Tenant linked. clerkUserId=${clerkUserId} → tenantId=${tenant.id}`);
   return NextResponse.json({ message: 'Tenant linked' }, { status: 200 });
 }

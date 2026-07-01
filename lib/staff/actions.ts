@@ -1,14 +1,9 @@
 // lib/staff/actions.ts
-// Server Actions for staff management — Clerk is the single source of truth.
-// No DB staff table. All state lives in Clerk.
-
 "use server";
 
 import { clerkClient } from "@clerk/nextjs/server";
 import { getSessionMeta, requireRole } from "@/lib/auth/getRole";
 import { revalidatePath } from "next/cache";
-
-// ── 1. Invite Staff (Manager or Field Agent) ───────────────────────────────
 
 export async function inviteStaff(formData: {
   email: string;
@@ -30,8 +25,6 @@ export async function inviteStaff(formData: {
 
   try {
     const clerk = await clerkClient();
-
-    // Parse fullName into first/last for Clerk
     const nameParts = fullName.trim().split(/\s+/);
     const firstName = nameParts[0] ?? "";
     const lastName = nameParts.slice(1).join(" ") ?? "";
@@ -67,8 +60,6 @@ export async function inviteStaff(formData: {
   }
 }
 
-// ── 2. Deactivate Staff ────────────────────────────────────────────────────
-
 export async function deactivateStaffAction(clerkUserId: string): Promise<{ success: boolean; message: string }> {
   await requireRole(["AGENCY_OWNER"]);
   const session = await getSessionMeta();
@@ -80,8 +71,6 @@ export async function deactivateStaffAction(clerkUserId: string): Promise<{ succ
 
   try {
     const clerk = await clerkClient();
-    
-    // Verify the user belongs to this agency before banning
     const user = await clerk.users.getUser(clerkUserId);
     const meta = user.publicMetadata as Record<string, unknown>;
     
@@ -90,7 +79,6 @@ export async function deactivateStaffAction(clerkUserId: string): Promise<{ succ
     }
 
     await clerk.users.banUser(clerkUserId);
-
     revalidatePath("/admin/settings/staff");
     return { success: true, message: "Staff deactivated and access revoked" };
   } catch (err) {
@@ -98,8 +86,6 @@ export async function deactivateStaffAction(clerkUserId: string): Promise<{ succ
     return { success: false, message: "Failed to deactivate staff" };
   }
 }
-
-// ── 3. Reactivate Staff ────────────────────────────────────────────────────
 
 export async function reactivateStaffAction(clerkUserId: string): Promise<{ success: boolean; message: string }> {
   await requireRole(["AGENCY_OWNER"]);
@@ -112,8 +98,6 @@ export async function reactivateStaffAction(clerkUserId: string): Promise<{ succ
 
   try {
     const clerk = await clerkClient();
-    
-    // Verify ownership
     const user = await clerk.users.getUser(clerkUserId);
     const meta = user.publicMetadata as Record<string, unknown>;
     
@@ -122,7 +106,6 @@ export async function reactivateStaffAction(clerkUserId: string): Promise<{ succ
     }
 
     await clerk.users.unbanUser(clerkUserId);
-
     revalidatePath("/admin/settings/staff");
     return { success: true, message: "Staff reactivated" };
   } catch (err) {
@@ -130,8 +113,6 @@ export async function reactivateStaffAction(clerkUserId: string): Promise<{ succ
     return { success: false, message: "Failed to reactivate staff" };
   }
 }
-
-// ── 4. Update Assigned Buildings ────────────────────────────────────────────
 
 export async function updateStaffBuildingsAction(
   clerkUserId: string,
@@ -147,8 +128,6 @@ export async function updateStaffBuildingsAction(
 
   try {
     const clerk = await clerkClient();
-    
-    // Verify ownership
     const user = await clerk.users.getUser(clerkUserId);
     const meta = user.publicMetadata as Record<string, unknown>;
     

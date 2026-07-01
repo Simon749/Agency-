@@ -7,6 +7,7 @@ import { tenants } from "@/db/schema";
 import { ResponsiveNavbar } from "@/components/ResponsiveNavbar";
 import Link from "next/link";
 import Loading from "@/app/loading";
+import SignOutCTA from "@/components/auth/SignOutCTA";
 
 const navItems = [
   { href: "/tenant/dashboard", label: "Dashboard" },
@@ -68,11 +69,21 @@ async function LayoutContent({ children }: { children: React.ReactNode }) {
       <div className="pt-16">
         <div className="md:flex">
           {/* Desktop Sidebar */}
-          <aside className="hidden w-56 flex-shrink-0 border-r border-white/10 bg-black px-4 py-6 md:block">
+          <aside className="hidden w-56 flex-shrink-0 border-r border-white/10 bg-black px-4 py-6 md:flex md:flex-col md:justify-between">
             <div className="flex flex-col gap-1">
               {navItems.map((item) => (
                 <SidebarLink key={item.href} href={item.href} label={item.label} />
               ))}
+            </div>
+
+            {/* Account / Sign out */}
+            <div className="border-t border-white/10 pt-4 mt-4">
+              <p className="px-4 text-xs text-white/40 truncate mb-3">
+                {tenant.fullName}
+              </p>
+              <div className="px-4">
+                
+              </div>
             </div>
           </aside>
 
