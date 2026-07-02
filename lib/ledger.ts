@@ -1,7 +1,7 @@
 // lib/ledger.ts
 // Tenant balance calculation and ledger operations
 
-import { eq } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { tenantLedger, pendingTransactions } from "@/db/schema";
 import type { InsertTenantLedgerEntry } from "@/db/schema";
@@ -18,26 +18,24 @@ export interface BalanceResult {
  * Calculate tenant balance from all ledger entries.
  * Never store balance — always compute on read.
  */
-export async function getTenantBalance(tenantId: string): Promise<BalanceResult> {
+
+export async function getTenantBalance(tenantId: string) {
   const db = getDb();
-  const rows = await db
-    .select({ type: tenantLedger.type, amount: tenantLedger.amount })
+  const [result] = await db
+    .select({
+      totalCharged: sql<number>`COALESCE(SUM(CASE WHEN ${tenantLedger.type} = 'DEBIT' THEN ${tenantLedger.amount} ELSE 0 END), 0)`,
+      totalPaid: sql<number>`COALESCE(SUM(CASE WHEN ${tenantLedger.type} = 'CREDIT' THEN ${tenantLedger.amount} ELSE 0 END), 0)`,
+    })
     .from(tenantLedger)
     .where(eq(tenantLedger.tenantId, tenantId));
 
-  let totalCharged = 0;
-  let totalPaid = 0;
-
-  for (const row of rows) {
-    const amt = parseFloat(row.amount as unknown as string);
-    if (row.type === "DEBIT") totalCharged += amt;
-    else if (row.type === "CREDIT") totalPaid += amt;
-  }
+  const totalCharged = Number(result.totalCharged);
+  const totalPaid = Number(result.totalPaid);
 
   return {
     totalCharged,
     totalPaid,
-    balance: totalCharged - totalPaid,
+    balance: totalCharged - totalPaid, // positive = owes, negative = overpaid
   };
 }
 

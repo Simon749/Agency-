@@ -1,10 +1,12 @@
 // lib/ledger/index.ts
 // Re-export all ledger functions for clean imports
+// PHASE 2: Added getTenantBalanceForMonth, getLedgerEntriesPaginated
 
-export { getTenantBalance, type BalanceResult } from "./getBalance";
+export { getTenantBalance, getTenantBalanceForMonth, type BalanceResult } from "./getBalance";
 export {
   getTenantStatement,
   getRecentLedgerEntries,
+  getLedgerEntriesPaginated,
   type StatementRow,
   type MonthlyGroup,
 } from "./getStatement";
@@ -15,3 +17,20 @@ export {
   getPendingTransaction,
   updatePendingTransaction,
 } from "./payments";
+
+// Manual payments
+export {
+  logManualPayment,
+  checkReferenceCodeExists,
+  type ManualPaymentInput,
+  type ManualPaymentResult,
+} from "./manualPayments";
+
+// Utility billing
+export {
+  getLastReading,
+  submitMeterReading,
+  getReadingHistory,
+  type MeterReadingInput,
+  type MeterReadingResult,
+} from "./utilityBilling";

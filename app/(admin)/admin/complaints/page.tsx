@@ -3,10 +3,26 @@ import { StatusBadge } from "@/components/complaints/StatusBadge";
 import { PriorityBadge } from "@/components/complaints/PriorityBadge";
 import Link from "next/link";
 
+const PAGE_SIZE = 8;
+
+// Maps each kanban column to its own page query param, so columns paginate independently.
+const COLUMN_PAGE_PARAM: Record<string, string> = {
+  OPEN: "openPage",
+  IN_PROGRESS: "progressPage",
+  RESOLVED: "resolvedPage",
+};
+
 export default async function AdminComplaintsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ building?: string; status?: string; priority?: string }>;
+  searchParams: Promise<{
+    building?: string;
+    status?: string;
+    priority?: string;
+    openPage?: string;
+    progressPage?: string;
+    resolvedPage?: string;
+  }>;
 }) {
   const params = await searchParams;
   const filters = {
@@ -36,6 +52,23 @@ export default async function AdminComplaintsPage({
     padding: "10px 20px", fontSize: "12px", fontWeight: 500, letterSpacing: "0.14em",
     color: "rgba(255,255,255,0.7)", backgroundColor: "transparent", border: "1px solid rgba(255,255,255,0.2)",
     cursor: "pointer", textTransform: "uppercase", fontFamily: '"Helvetica Neue", sans-serif',
+  };
+
+  // Builds a link that changes only the target column's page, preserving filters + other columns' pages.
+  const buildColumnPageLink = (columnKey: string, newPage: number) => {
+    const sp = new URLSearchParams();
+    if (params.building) sp.set("building", params.building);
+    if (params.status) sp.set("status", params.status);
+    if (params.priority) sp.set("priority", params.priority);
+
+    for (const [key, paramName] of Object.entries(COLUMN_PAGE_PARAM)) {
+      if (key === columnKey) continue;
+      const existing = (params as Record<string, string | undefined>)[paramName];
+      if (existing) sp.set(paramName, existing);
+    }
+
+    sp.set(COLUMN_PAGE_PARAM[columnKey], String(newPage));
+    return `/admin/complaints?${sp.toString()}`;
   };
 
   return (
@@ -83,7 +116,17 @@ export default async function AdminComplaintsPage({
       {/* Kanban */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "24px" }}>
         {columns.map((col) => {
-          const colItems = rows.filter((r) => r.complaint.status === col.key);
+          const allColItems = rows.filter((r) => r.complaint.status === col.key);
+
+          const pageParamName = COLUMN_PAGE_PARAM[col.key];
+          const rawPage = (params as Record<string, string | undefined>)[pageParamName];
+          const colPage = Math.max(1, parseInt(rawPage ?? "1", 10));
+          const colTotalPages = Math.ceil(allColItems.length / PAGE_SIZE);
+          const colOffset = (colPage - 1) * PAGE_SIZE;
+          const colItems = allColItems.slice(colOffset, colOffset + PAGE_SIZE);
+          const hasPrev = colPage > 1;
+          const hasNext = colPage < colTotalPages;
+
           return (
             <div key={col.key}>
               <div style={{
@@ -97,7 +140,7 @@ export default async function AdminComplaintsPage({
                   fontSize: "11px", fontWeight: 500, color: "rgba(255,255,255,0.5)",
                   backgroundColor: "rgba(255,255,255,0.06)", padding: "2px 8px",
                 }}>
-                  {colItems.length}
+                  {allColItems.length}
                 </span>
               </div>
 
@@ -147,6 +190,45 @@ export default async function AdminComplaintsPage({
                   ))
                 )}
               </div>
+
+              {/* Per-column pagination */}
+              {colTotalPages > 1 && (
+                <div style={{ display: "flex", justifyContent: "center", gap: "6px", marginTop: "16px", alignItems: "center" }}>
+                  <Link
+                    href={hasPrev ? buildColumnPageLink(col.key, colPage - 1) : "#"}
+                    style={{
+                      padding: "6px 12px",
+                      fontSize: "11px",
+                      letterSpacing: "0.1em",
+                      color: hasPrev ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.2)",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                      textDecoration: "none",
+                      textTransform: "uppercase",
+                      pointerEvents: hasPrev ? "auto" : "none",
+                    }}
+                  >
+                    ← Prev
+                  </Link>
+                  <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", padding: "0 10px" }}>
+                    {colPage} / {colTotalPages}
+                  </span>
+                  <Link
+                    href={hasNext ? buildColumnPageLink(col.key, colPage + 1) : "#"}
+                    style={{
+                      padding: "6px 12px",
+                      fontSize: "11px",
+                      letterSpacing: "0.1em",
+                      color: hasNext ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.2)",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                      textDecoration: "none",
+                      textTransform: "uppercase",
+                      pointerEvents: hasNext ? "auto" : "none",
+                    }}
+                  >
+                    Next →
+                  </Link>
+                </div>
+              )}
             </div>
           );
         })}

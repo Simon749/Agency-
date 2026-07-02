@@ -1,10 +1,3 @@
-// middleware.ts — root of project
-// FIXES:
-// 1. Agency kill-switch uses in-memory LRU cache (60s TTL)
-// 2. VACATED tenants are blocked from /tenant/* routes
-// 3. All auth() calls now have null guards
-// 4. Fetch fresh user data from Clerk API (not stale sessionClaims)
-
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { clerkClient } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
@@ -17,7 +10,8 @@ const isAdminRoute = createRouteMatcher(['/admin(.*)']);
 const isAgentRoute = createRouteMatcher(['/admin/agent(.*)']);
 const isTenantRoute = createRouteMatcher(['/tenant(.*)']);
 const isProtectedRoute = createRouteMatcher(['/super-admin(.*)', '/admin(.*)', '/tenant(.*)']);
-const isPublicRoute = createRouteMatcher(['/', '/sign-in(.*)', '/suspended', '/deactivated']);
+// FIX: Added /pending-setup and /sign-up to public routes
+const isPublicRoute = createRouteMatcher(['/', '/sign-in(.*)', '/sign-up(.*)', '/pending-setup', '/suspended', '/deactivated']);
 
 const ROLE_HOME: Record<string, string> = {
   SUPER_ADMIN: '/super-admin/dashboard',
@@ -40,7 +34,6 @@ const agencyStatusCache = new Map<string, CacheEntry>();
 async function isAgencyActive(agencyId: string): Promise<boolean> {
   const now = Date.now();
   const cached = agencyStatusCache.get(agencyId);
-
   if (cached && cached.expiresAt > now) {
     return cached.isActive;
   }
@@ -57,6 +50,9 @@ async function isAgencyActive(agencyId: string): Promise<boolean> {
     return isActive;
   } catch (err) {
     console.error('[KILL SWITCH] DB error checking agency status:', err);
+    // FIX: If DB is down/cold, assume active but cache the error briefly
+    // so we don't hammer the DB on every request
+    agencyStatusCache.set(agencyId, { isActive: true, expiresAt: now + 10_000 });
     return true;
   }
 }
@@ -74,7 +70,6 @@ async function isTenantVacated(clerkUserId: string): Promise<boolean> {
     return tenant?.status === 'VACATED';
   } catch (err) {
     console.error('[MIDDLEWARE] Error checking tenant status:', err);
-    // Fail open — don't block if DB is down
     return false;
   }
 }
@@ -99,36 +94,33 @@ export default clerkMiddleware(async (auth, req) => {
   // 3. Not signed in + any other route → let through
   if (!userId || !sessionClaims) return NextResponse.next();
 
-  // ────────────────────────────────────────────────────────────────────────
-  // FIX: Fetch fresh user data from Clerk API instead of relying on
-  // sessionClaims.publicMetadata which may be stale or missing.
-  // ────────────────────────────────────────────────────────────────────────
-  let role: string | null = null;
-  let agencyId: string | null = null;
-  let buildingId: string | null = null;
-  let unitId: string | null = null;
+  // ── Read role from sessionClaims (fast, no API call) ─────────────────────
+  const meta = (sessionClaims?.publicMetadata ?? {}) as Record<string, string>;
+  let role = meta.role ?? null;
+  let agencyId = meta.agencyId ?? null;
+  let buildingId = meta.buildingId ?? null;
+  let unitId = meta.unitId ?? null;
 
-  try {
-    const client = await clerkClient();
-    const user = await client.users.getUser(userId);
-    const meta = user.publicMetadata as Record<string, string | null>;
-    role = (meta.role as string) ?? null;
-    agencyId = (meta.agencyId as string) ?? null;
-    buildingId = (meta.buildingId as string) ?? null;
-    unitId = (meta.unitId as string) ?? null;
-  } catch (err) {
-    console.error('[MIDDLEWARE] Failed to fetch user from Clerk API:', err);
-    // Fall back to sessionClaims (may be stale but better than nothing)
-    const meta = (sessionClaims?.publicMetadata ?? {}) as Record<string, string>;
-    role = meta.role ?? null;
-    agencyId = meta.agencyId ?? null;
+  // If metadata is missing from session, try Clerk API once
+  if (!role) {
+    try {
+      const client = await clerkClient();
+      const user = await client.users.getUser(userId);
+      const freshMeta = user.publicMetadata as Record<string, string | null>;
+      role = (freshMeta.role as string) ?? null;
+      agencyId = (freshMeta.agencyId as string) ?? null;
+      buildingId = (freshMeta.buildingId as string) ?? null;
+      unitId = (freshMeta.unitId as string) ?? null;
+    } catch (err) {
+      console.error('[MIDDLEWARE] Failed to fetch user from Clerk API:', err);
+    }
   }
 
   // 5. Signed-in user on "/" → let app/page.tsx handle redirect server-side
   if (path === '/') return NextResponse.next();
 
-  // 6. Signed-in user hitting /sign-in → send to their dashboard
-  if (path.startsWith('/sign-in') && role) {
+  // 6. Signed-in user hitting /sign-in or /sign-up → send to their dashboard
+  if ((path.startsWith('/sign-in') || path.startsWith('/sign-up')) && role) {
     return NextResponse.redirect(new URL(ROLE_HOME[role], req.url));
   }
 
@@ -183,6 +175,6 @@ export default clerkMiddleware(async (auth, req) => {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

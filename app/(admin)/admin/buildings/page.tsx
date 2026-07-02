@@ -2,11 +2,18 @@
 import { revalidatePath } from 'next/cache';
 import { getDb } from '@/lib/db';
 import { buildings } from '@/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, count } from 'drizzle-orm';
 import { getSessionMeta } from '@/lib/auth/getRole';
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 
-export default async function BuildingsPage() {
+const PAGE_SIZE = 25;
+
+export default async function BuildingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const session = await getSessionMeta();
   const { agencyId } = session;
 
@@ -14,12 +21,27 @@ export default async function BuildingsPage() {
     redirect('/pending-setup');
   }
 
+  const params = await searchParams;
+  const page = Math.max(1, parseInt(params.page ?? '1', 10));
+  const offset = (page - 1) * PAGE_SIZE;
+
   const db = getDb();
-  const allBuildings = await db
-    .select()
-    .from(buildings)
-    .where(eq(buildings.agencyId, agencyId))
-    .orderBy(desc(buildings.createdAt));
+
+  const [countResult, allBuildings] = await Promise.all([
+    db.select({ count: count() }).from(buildings).where(eq(buildings.agencyId, agencyId)),
+    db
+      .select()
+      .from(buildings)
+      .where(eq(buildings.agencyId, agencyId))
+      .orderBy(desc(buildings.createdAt))
+      .limit(PAGE_SIZE)
+      .offset(offset),
+  ]);
+
+  const totalCount = Number(countResult[0]?.count ?? 0);
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+  const hasPrev = page > 1;
+  const hasNext = page < totalPages;
 
   return (
     <div>
@@ -113,7 +135,8 @@ export default async function BuildingsPage() {
             borderBottom: '1px solid rgba(255,255,255,0.1)',
           }}
         >
-          {allBuildings.length} {allBuildings.length === 1 ? 'Building' : 'Buildings'}
+          {totalCount} {totalCount === 1 ? 'Building' : 'Buildings'}
+          {totalPages > 1 && ` · Page ${page} of ${totalPages}`}
         </p>
 
         {allBuildings.length === 0 ? (
@@ -121,32 +144,73 @@ export default async function BuildingsPage() {
             No buildings yet. Add your first property above.
           </p>
         ) : (
-          <div style={{ display: 'grid', gap: '2px' }}>
-            {/* Table header */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '2fr 1.5fr 1.5fr 1.5fr 100px 100px',
-                gap: '16px',
-                padding: '10px 20px',
-                fontSize: '11px',
-                letterSpacing: '0.16em',
-                color: 'rgba(255,255,255,0.35)',
-                textTransform: 'uppercase',
-              }}
-            >
-              <span>Name</span>
-              <span>Location</span>
-              <span>Locale</span>
-              <span>Landlord</span>
-              <span>Units</span>
-              <span>Action</span>
+          <>
+            <div style={{ display: 'grid', gap: '2px' }}>
+              {/* Table header */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '2fr 1.5fr 1.5fr 1.5fr 100px 100px',
+                  gap: '16px',
+                  padding: '10px 20px',
+                  fontSize: '11px',
+                  letterSpacing: '0.16em',
+                  color: 'rgba(255,255,255,0.35)',
+                  textTransform: 'uppercase',
+                }}
+              >
+                <span>Name</span>
+                <span>Location</span>
+                <span>Locale</span>
+                <span>Landlord</span>
+                <span>Units</span>
+                <span>Action</span>
+              </div>
+
+              {allBuildings.map((building) => (
+                <BuildingRow key={building.id} building={building} />
+              ))}
             </div>
 
-            {allBuildings.map((building) => (
-              <BuildingRow key={building.id} building={building} />
-            ))}
-          </div>
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '32px', alignItems: 'center' }}>
+                <Link
+                  href={hasPrev ? `/admin/buildings?page=${page - 1}` : '#'}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: '12px',
+                    letterSpacing: '0.12em',
+                    color: hasPrev ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    textDecoration: 'none',
+                    textTransform: 'uppercase',
+                    pointerEvents: hasPrev ? 'auto' : 'none',
+                  }}
+                >
+                  ← Prev
+                </Link>
+                <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', padding: '0 16px' }}>
+                  Page {page} of {totalPages}
+                </span>
+                <Link
+                  href={hasNext ? `/admin/buildings?page=${page + 1}` : '#'}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: '12px',
+                    letterSpacing: '0.12em',
+                    color: hasNext ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    textDecoration: 'none',
+                    textTransform: 'uppercase',
+                    pointerEvents: hasNext ? 'auto' : 'none',
+                  }}
+                >
+                  Next →
+                </Link>
+              </div>
+            )}
+          </>
         )}
       </section>
     </div>

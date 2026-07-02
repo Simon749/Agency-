@@ -23,6 +23,8 @@ interface LeaseRow {
   signedAt: Date | null;
 }
 
+const PAGE_SIZE = 25;
+
 export default async function LeasesPage({
   searchParams,
 }: {
@@ -30,6 +32,7 @@ export default async function LeasesPage({
     status?: string;
     buildingId?: string;
     search?: string;
+    page?: string;
   }>;
 }) {
   const session = await getSessionMeta();
@@ -43,6 +46,9 @@ export default async function LeasesPage({
 
   const db = getDb();
   const params = await searchParams;
+
+  const page = Math.max(1, parseInt(params.page ?? "1", 10));
+  const offset = (page - 1) * PAGE_SIZE;
 
   // Load buildings for filter
   const buildingList = await db
@@ -72,8 +78,8 @@ export default async function LeasesPage({
     )!;
   }
 
-  // Execute query
-  const leaseList: LeaseRow[] = await db
+  // Execute query — count + paginated rows in parallel
+  const baseQuery = db
     .select({
       leaseId: leases.id,
       tenantName: tenants.fullName,
@@ -94,6 +100,24 @@ export default async function LeasesPage({
     .where(whereClause)
     .orderBy(desc(leases.createdAt));
 
+  const countQuery = db
+    .select({ count: sql<number>`count(*)` })
+    .from(leases)
+    .innerJoin(tenants, eq(tenants.id, leases.tenantId))
+    .innerJoin(units, eq(units.id, leases.unitId))
+    .innerJoin(buildings, eq(buildings.id, tenants.buildingId))
+    .where(whereClause);
+
+  const [leaseList, countResult]: [LeaseRow[], { count: number }[]] = await Promise.all([
+    baseQuery.limit(PAGE_SIZE).offset(offset),
+    countQuery,
+  ]);
+
+  const totalCount = Number(countResult[0]?.count ?? 0);
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+  const hasPrev = page > 1;
+  const hasNext = page < totalPages;
+
   const statusFilters = [
     { key: "ALL", label: "All" },
     { key: "ACTIVE", label: "Active" },
@@ -104,6 +128,16 @@ export default async function LeasesPage({
   const currentStatus = params.status ?? "ALL";
   const currentBuildingId = params.buildingId ?? "";
   const currentSearch = params.search ?? "";
+
+  // Build query string helper for pagination links — preserves current filters
+  const buildPageLink = (newPage: number) => {
+    const sp = new URLSearchParams();
+    sp.set("status", currentStatus);
+    if (currentBuildingId) sp.set("buildingId", currentBuildingId);
+    if (currentSearch) sp.set("search", currentSearch);
+    sp.set("page", String(newPage));
+    return `/admin/leases?${sp.toString()}`;
+  };
 
   return (
     <div>
@@ -225,6 +259,20 @@ export default async function LeasesPage({
         </form>
       </div>
 
+      {/* Results count */}
+      <p
+        style={{
+          fontSize: "11px",
+          letterSpacing: "0.2em",
+          color: "rgba(255,255,255,0.45)",
+          textTransform: "uppercase",
+          marginBottom: "16px",
+        }}
+      >
+        {totalCount} {totalCount === 1 ? "Lease" : "Leases"}
+        {totalPages > 1 && ` · Page ${page} of ${totalPages}`}
+      </p>
+
       {/* Lease Table */}
       <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
         {/* Header */}
@@ -327,6 +375,45 @@ export default async function LeasesPage({
           })
         )}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div style={{ display: "flex", justifyContent: "center", gap: "8px", marginTop: "32px", alignItems: "center" }}>
+          <Link
+            href={hasPrev ? buildPageLink(page - 1) : "#"}
+            style={{
+              padding: "8px 16px",
+              fontSize: "12px",
+              letterSpacing: "0.12em",
+              color: hasPrev ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.2)",
+              border: "1px solid rgba(255,255,255,0.2)",
+              textDecoration: "none",
+              textTransform: "uppercase",
+              pointerEvents: hasPrev ? "auto" : "none",
+            }}
+          >
+            ← Prev
+          </Link>
+          <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", padding: "0 16px" }}>
+            Page {page} of {totalPages}
+          </span>
+          <Link
+            href={hasNext ? buildPageLink(page + 1) : "#"}
+            style={{
+              padding: "8px 16px",
+              fontSize: "12px",
+              letterSpacing: "0.12em",
+              color: hasNext ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.2)",
+              border: "1px solid rgba(255,255,255,0.2)",
+              textDecoration: "none",
+              textTransform: "uppercase",
+              pointerEvents: hasNext ? "auto" : "none",
+            }}
+          >
+            Next →
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

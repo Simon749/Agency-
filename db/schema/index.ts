@@ -12,6 +12,7 @@ export * from "./leases";
 export * from "./tenant_ledger";
 export * from "./utility_readings";
 export * from "./pending_transactions";
-export * from "./complaints";
+export * from "./complaints";       
+export * from "./notifications";
 export { staff } from "./staff";
 export type { Staff, InsertStaff } from "./staff";

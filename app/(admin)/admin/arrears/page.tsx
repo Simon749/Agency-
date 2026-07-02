@@ -15,6 +15,8 @@ export const metadata = {
   title: 'Arrears Report — PropFlow',
 };
 
+const PAGE_SIZE = 25;
+
 export default async function ArrearsPage({
   searchParams,
 }: {
@@ -22,6 +24,7 @@ export default async function ArrearsPage({
     buildingId?: string;
     sortBy?: 'amount' | 'days';
     sortOrder?: 'asc' | 'desc';
+    page?: string;
   }>;
 }) {
   const session = await requireRole(['AGENCY_OWNER', 'MANAGER']);
@@ -51,6 +54,23 @@ export default async function ArrearsPage({
   const avgDays = tenantCount > 0
     ? Math.round(arrears.reduce((sum, a) => sum + a.daysOverdue, 0) / tenantCount)
     : 0;
+
+  // Pagination — stats above stay based on the full arrears list; only the table is sliced.
+  const page = Math.max(1, parseInt(params.page ?? '1', 10));
+  const totalPages = Math.ceil(tenantCount / PAGE_SIZE);
+  const offset = (page - 1) * PAGE_SIZE;
+  const pagedArrears = arrears.slice(offset, offset + PAGE_SIZE);
+  const hasPrev = page > 1;
+  const hasNext = page < totalPages;
+
+  const buildPageLink = (newPage: number) => {
+    const sp = new URLSearchParams();
+    if (params.buildingId) sp.set('buildingId', params.buildingId);
+    sp.set('sortBy', params.sortBy ?? 'amount');
+    sp.set('sortOrder', params.sortOrder ?? 'desc');
+    sp.set('page', String(newPage));
+    return `/admin/arrears?${sp.toString()}`;
+  };
 
   return (
     <div>
@@ -94,10 +114,49 @@ export default async function ArrearsPage({
 
       {/* Arrears Table */}
       <ArrearsTableClient
-        arrears={arrears}
+        arrears={pagedArrears}
         currentSortBy={params.sortBy ?? 'amount'}
         currentSortOrder={params.sortOrder ?? 'desc'}
       />
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '32px', alignItems: 'center' }}>
+          <Link
+            href={hasPrev ? buildPageLink(page - 1) : '#'}
+            style={{
+              padding: '8px 16px',
+              fontSize: '12px',
+              letterSpacing: '0.12em',
+              color: hasPrev ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              textDecoration: 'none',
+              textTransform: 'uppercase',
+              pointerEvents: hasPrev ? 'auto' : 'none',
+            }}
+          >
+            ← Prev
+          </Link>
+          <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', padding: '0 16px' }}>
+            Page {page} of {totalPages}
+          </span>
+          <Link
+            href={hasNext ? buildPageLink(page + 1) : '#'}
+            style={{
+              padding: '8px 16px',
+              fontSize: '12px',
+              letterSpacing: '0.12em',
+              color: hasNext ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              textDecoration: 'none',
+              textTransform: 'uppercase',
+              pointerEvents: hasNext ? 'auto' : 'none',
+            }}
+          >
+            Next →
+          </Link>
+        </div>
+      )}
 
       {/* Back link */}
       <div style={{ marginTop: '32px' }}>

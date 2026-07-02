@@ -2,23 +2,31 @@
 import { revalidatePath } from 'next/cache';
 import { getDb } from '@/lib/db';
 import { buildings, units } from '@/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, count } from 'drizzle-orm';
 import { getSessionMeta } from '@/lib/auth/getRole';
 import { redirect, notFound } from 'next/navigation';
+import Link from 'next/link';
 import type { Unit } from '@/db/schema';
+
+const PAGE_SIZE = 25;
 
 interface Props {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ page?: string }>;
 }
 
-export default async function UnitsPage({ params }: Props) {
+export default async function UnitsPage({ params, searchParams }: Props) {
   const { id: buildingId } = await params;
+  const { page: pageParam } = await searchParams;
   const session = await getSessionMeta();
   const { agencyId } = session;
 
   if (!agencyId) {
     redirect('/pending-setup');
   }
+
+  const page = Math.max(1, parseInt(pageParam ?? '1', 10));
+  const offset = (page - 1) * PAGE_SIZE;
 
   const db = getDb();
 
@@ -34,12 +42,25 @@ export default async function UnitsPage({ params }: Props) {
     notFound();
   }
 
-  // Fetch units for this building — use AND for combined conditions
-  const allUnits = await db
-    .select()
-    .from(units)
-    .where(and(eq(units.buildingId, buildingId), eq(units.agencyId, agencyId)))
-    .orderBy(units.unitNumber);
+  // Fetch units for this building — count + paginated rows in parallel
+  const [countResult, allUnits] = await Promise.all([
+    db
+      .select({ count: count() })
+      .from(units)
+      .where(and(eq(units.buildingId, buildingId), eq(units.agencyId, agencyId))),
+    db
+      .select()
+      .from(units)
+      .where(and(eq(units.buildingId, buildingId), eq(units.agencyId, agencyId)))
+      .orderBy(units.unitNumber)
+      .limit(PAGE_SIZE)
+      .offset(offset),
+  ]);
+
+  const totalCount = Number(countResult[0]?.count ?? 0);
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+  const hasPrev = page > 1;
+  const hasNext = page < totalPages;
 
   return (
     <div>
@@ -75,7 +96,8 @@ export default async function UnitsPage({ params }: Props) {
         {building.name} — Units
       </h1>
       <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.5)', marginBottom: '48px' }}>
-        {allUnits.length} {allUnits.length === 1 ? 'unit' : 'units'} · {building.location}
+        {totalCount} {totalCount === 1 ? 'unit' : 'units'} · {building.location}
+        {totalPages > 1 && ` · Page ${page} of ${totalPages}`}
       </p>
 
       {/* Add Unit Form */}
@@ -230,33 +252,74 @@ export default async function UnitsPage({ params }: Props) {
             No units yet. Add your first unit above.
           </p>
         ) : (
-          <div style={{ display: 'grid', gap: '2px' }}>
-            {/* Table header */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr 100px 80px',
-                gap: '16px',
-                padding: '10px 20px',
-                fontSize: '11px',
-                letterSpacing: '0.16em',
-                color: 'rgba(255,255,255,0.35)',
-                textTransform: 'uppercase',
-              }}
-            >
-              <span>Unit</span>
-              <span>Floor</span>
-              <span>Type</span>
-              <span>Rent (KES)</span>
-              <span>Deposit (KES)</span>
-              <span>Status</span>
-              <span>Action</span>
+          <>
+            <div style={{ display: 'grid', gap: '2px' }}>
+              {/* Table header */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr 100px 80px',
+                  gap: '16px',
+                  padding: '10px 20px',
+                  fontSize: '11px',
+                  letterSpacing: '0.16em',
+                  color: 'rgba(255,255,255,0.35)',
+                  textTransform: 'uppercase',
+                }}
+              >
+                <span>Unit</span>
+                <span>Floor</span>
+                <span>Type</span>
+                <span>Rent (KES)</span>
+                <span>Deposit (KES)</span>
+                <span>Status</span>
+                <span>Action</span>
+              </div>
+
+              {allUnits.map((unit: Unit) => (
+                <UnitRow key={unit.id} unit={unit} />
+              ))}
             </div>
 
-            {allUnits.map((unit: Unit) => (
-              <UnitRow key={unit.id} unit={unit} />
-            ))}
-          </div>
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '32px', alignItems: 'center' }}>
+                <Link
+                  href={hasPrev ? `/admin/buildings/${buildingId}/units?page=${page - 1}` : '#'}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: '12px',
+                    letterSpacing: '0.12em',
+                    color: hasPrev ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    textDecoration: 'none',
+                    textTransform: 'uppercase',
+                    pointerEvents: hasPrev ? 'auto' : 'none',
+                  }}
+                >
+                  ← Prev
+                </Link>
+                <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', padding: '0 16px' }}>
+                  Page {page} of {totalPages}
+                </span>
+                <Link
+                  href={hasNext ? `/admin/buildings/${buildingId}/units?page=${page + 1}` : '#'}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: '12px',
+                    letterSpacing: '0.12em',
+                    color: hasNext ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    textDecoration: 'none',
+                    textTransform: 'uppercase',
+                    pointerEvents: hasNext ? 'auto' : 'none',
+                  }}
+                >
+                  Next →
+                </Link>
+              </div>
+            )}
+          </>
         )}
       </section>
     </div>

@@ -1,77 +1,100 @@
 /**
- * PropFlow Database Client
- *
- * FIX: Added proper connection pool settings.
- * Previously the pool had no limits, causing slow cold connections
- * and unbounded pool growth under load.
+ * PropFlow Database Client — Neon WebSocket (optimized for Phase 2)
+ * Changes: query timeout, better error handling, connection health check, pool tuning
  */
 
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
-import * as schema from '@/db/schema';
-import * as relations from '@/db/relations';
+import { Pool, neonConfig } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-serverless";
+import ws from "ws";
+import * as schema from "@/db/schema";
+import * as relations from "@/db/relations";
+import { sql } from "drizzle-orm";
 
 const fullSchema = { ...schema, ...relations };
 
-let instance: ReturnType<typeof drizzle<typeof fullSchema>> | null = null;
+type DatabaseClient = ReturnType<typeof drizzle<typeof fullSchema>>;
 
-export function getDb() {
-  if (!instance) {
-    const databaseUrl = process.env.DATABASE_URL;
-    if (!databaseUrl) {
-      throw new Error('DATABASE_URL is not set. Please configure it in your .env file.');
-    }
-
-    const pool = new Pool({
-      connectionString: databaseUrl,
-
-      // ── Pool tuning (FIX) ────────────────────────────────────────────────
-      max: 10,                    // max open connections (default was unlimited)
-      idleTimeoutMillis: 30_000,  // close idle connections after 30s
-      connectionTimeoutMillis: 5_000, // fail fast if can't get a connection in 5s
-
-      // ── SSL (FIX: use verify-full to silence the deprecation warning) ────
-      ssl: process.env.NODE_ENV === 'production'
-        ? { rejectUnauthorized: true }  // verify-full equivalent
-        : undefined,
-    });
-
-    // Log pool errors so they don't silently swallow exceptions
-    pool.on('error', (err) => {
-      console.error('[DB Pool] Unexpected error on idle client:', err);
-    });
-
-    instance = drizzle(pool, { schema: fullSchema });
-  }
-  return instance;
+interface DatabaseGlobals {
+  db?: DatabaseClient;
 }
 
-// ── Convenience exports ────────────────────────────────────────────
+interface DbPoolConnectionOptions {
+  connectionString: string;
+  connectionTimeoutMillis: number;
+  idleTimeoutMillis: number;
+  max: number;
+  query_timeout?: number;
+}
+
+// Required for WebSocket connections
+neonConfig.webSocketConstructor = ws;
+
+const globalForDb = globalThis as unknown as DatabaseGlobals;
+
+export function getDb(): DatabaseClient {
+  if (!globalForDb.db) {
+    const databaseUrl: string | undefined = process.env.DATABASE_URL;
+    if (!databaseUrl) {
+      throw new Error("DATABASE_URL is not set.");
+    }
+
+    const pool: Pool = new Pool({
+      connectionString: databaseUrl,
+      // Connection timeout for cold starts (Neon serverless)
+      connectionTimeoutMillis: 10_000,
+      // Idle timeout — close connections faster to avoid stale state
+      idleTimeoutMillis: 10_000,
+      // Max connections: Neon free tier = 5, paid = 20+
+      // Use env var to tune per environment
+      max: parseInt(process.env.DB_POOL_MAX ?? "5", 10),
+      // Query timeout: kill runaway queries (30s for web requests)
+      query_timeout: 30_000,
+    } as DbPoolConnectionOptions);
+
+    // Handle pool errors without crashing the server
+    pool.on("error", (err: Error) => {
+      console.error("[DB Pool] Idle client error:", err.message);
+      // Don't throw — let the next request create a fresh connection
+    });
+
+    globalForDb.db = drizzle(pool, { schema: fullSchema });
+  }
+
+  return globalForDb.db;
+}
+
+/**
+ * Health check: verify DB is reachable.
+ * Returns true if a simple query succeeds within 5 seconds.
+ */
+export async function checkDbHealth(): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
+  const start = Date.now();
+  try {
+    const db = getDb();
+    await db.execute(sql`SELECT 1`);
+    return { ok: true, latencyMs: Date.now() - start };
+  } catch (err) {
+    return {
+      ok: false,
+      latencyMs: Date.now() - start,
+      error: err instanceof Error ? err.message : "Unknown DB error",
+    };
+  }
+}
+
 export { schema, relations, fullSchema };
 
 export type {
-  Agency,
-  InsertAgency,
-  Building,
-  InsertBuilding,
-  BuildingUtility,
-  InsertBuildingUtility,
-  Unit,
-  InsertUnit,
-  Tenant,
-  InsertTenant,
-  Lease,
-  InsertLease,
-  TenantLedgerEntry,
-  InsertTenantLedgerEntry,
-  UtilityReading,
-  InsertUtilityReading,
-  PendingTransaction,
-  InsertPendingTransaction,
-  Complaint,
-  InsertComplaint,
-  ComplaintUpdate,
-  InsertComplaintUpdate,
-  Staff,
-  InsertStaff,
-} from '@/db/schema';
+  Agency, InsertAgency,
+  Building, InsertBuilding,
+  BuildingUtility, InsertBuildingUtility,
+  Unit, InsertUnit,
+  Tenant, InsertTenant,
+  Lease, InsertLease,
+  TenantLedgerEntry, InsertTenantLedgerEntry,
+  UtilityReading, InsertUtilityReading,
+  PendingTransaction, InsertPendingTransaction,
+  Complaint, InsertComplaint,
+  ComplaintUpdate, InsertComplaintUpdate,
+  Staff, InsertStaff,
+} from "@/db/schema";

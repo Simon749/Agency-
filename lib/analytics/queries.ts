@@ -1,7 +1,7 @@
 // lib/analytics/queries.ts
 // Data aggregation layer for Agency Owner analytics dashboard.
-// All queries are scoped to agencyId — zero cross-agency data leaks.
-// Uses Drizzle ORM with raw SQL aggregations for performance.
+// PHASE 2 OPTIMIZED: All N+1 loops eliminated. Single-query aggregations.
+// All queries scoped to agencyId — zero cross-agency data leaks.
 
 import { eq, and, gte, lte, sql, desc, count, sum } from "drizzle-orm";
 import { getDb } from "@/lib/db";
@@ -13,6 +13,7 @@ import {
   leases,
   agencies,
 } from "@/db/schema";
+import { unstable_cache } from "next/cache";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -21,13 +22,13 @@ export interface DashboardSummary {
   totalUnits: number;
   occupiedUnits: number;
   vacantUnits: number;
-  occupancyRate: number; // 0-100
+  occupancyRate: number;
   totalTenants: number;
   activeTenants: number;
   totalRentCollectedThisMonth: number;
   totalOutstandingBalance: number;
   totalExpectedRentThisMonth: number;
-  collectionRate: number; // 0-100
+  collectionRate: number;
 }
 
 export interface BuildingBreakdown {
@@ -67,7 +68,7 @@ export interface ArrearsTenant {
 }
 
 export interface DateRange {
-  from: string; // YYYY-MM-DD
+  from: string;
   to: string;
 }
 
@@ -82,111 +83,92 @@ function getMonthRange(month?: string): { start: string; end: string } {
   return { start, end };
 }
 
-// ── 1. Dashboard Summary (top-level KPIs) ──────────────────────────────────
+// ── 1. Dashboard Summary — CACHED 30s ──────────────────────────────────────
 
-export async function getDashboardSummary(
-  agencyId: string,
-  month?: string
-): Promise<DashboardSummary> {
-  const db = getDb();
-  const { start, end } = getMonthRange(month);
-  const billingMonth = month ?? new Date().toISOString().slice(0, 7);
+/**
+ * Get dashboard summary with 30-second Next.js cache.
+ * Cache invalidated automatically on mutations via revalidateTag('dashboard').
+ * 
+ * BEFORE: 8 sequential queries + per-tenant balance loop
+ * AFTER:  8 parallel queries + single SQL aggregate for outstanding
+ */
+export const getDashboardSummary = unstable_cache(
+  async (agencyId: string, month?: string): Promise<DashboardSummary> => {
+    const db = getDb();
+    const { start, end } = getMonthRange(month);
 
-  // Count buildings, units, tenants
-  const [buildingCount] = await db
-    .select({ count: count() })
-    .from(buildings)
-    .where(eq(buildings.agencyId, agencyId));
+    // All counts in parallel — each is a simple indexed lookup
+    const [
+      buildingCount,
+      unitCount,
+      occupiedCount,
+      tenantCount,
+      activeTenantCount,
+      collected,
+      expected,
+      outstanding,
+    ] = await Promise.all([
+      db.select({ count: count() }).from(buildings).where(eq(buildings.agencyId, agencyId)),
+      db.select({ count: count() }).from(units).where(eq(units.agencyId, agencyId)),
+      db.select({ count: count() }).from(units).where(and(eq(units.agencyId, agencyId), eq(units.isOccupied, true))),
+      db.select({ count: count() }).from(tenants).where(eq(tenants.agencyId, agencyId)),
+      db.select({ count: count() }).from(tenants).where(
+        and(eq(tenants.agencyId, agencyId), eq(tenants.status, "ACTIVE"), eq(tenants.inviteStatus, "ACCEPTED"))
+      ),
+      db.select({ total: sum(tenantLedger.amount) }).from(tenantLedger).where(
+        and(
+          eq(tenantLedger.agencyId, agencyId),
+          eq(tenantLedger.type, "CREDIT"),
+          eq(tenantLedger.category, "RENT"),
+          gte(tenantLedger.createdAt, new Date(start)),
+          lte(tenantLedger.createdAt, new Date(end + "T23:59:59"))
+        )
+      ),
+      db.select({ total: sum(units.rentAmount) }).from(units).where(and(eq(units.agencyId, agencyId), eq(units.isOccupied, true))),
+      // Total outstanding — SINGLE QUERY for all tenants
+      db.select({
+        outstanding: sql<number>`COALESCE(SUM(
+          CASE WHEN ${tenantLedger.type} = 'DEBIT' THEN ${tenantLedger.amount}::numeric ELSE 0 END -
+          CASE WHEN ${tenantLedger.type} = 'CREDIT' THEN ${tenantLedger.amount}::numeric ELSE 0 END
+        ), 0)`,
+      }).from(tenants).leftJoin(tenantLedger, eq(tenants.id, tenantLedger.tenantId)).where(eq(tenants.agencyId, agencyId)),
+    ]);
 
-  const [unitCount] = await db
-    .select({ count: count() })
-    .from(units)
-    .where(eq(units.agencyId, agencyId));
+    const totalBuildings = Number(buildingCount[0]?.count ?? 0);
+    const totalUnits = Number(unitCount[0]?.count ?? 0);
+    const occupied = Number(occupiedCount[0]?.count ?? 0);
+    const totalRentCollected = Number(collected[0]?.total ?? 0);
+    const totalExpectedRent = Number(expected[0]?.total ?? 0);
+    const totalOutstanding = Math.max(0, Number(outstanding[0]?.outstanding ?? 0));
 
-  const [occupiedCount] = await db
-    .select({ count: count() })
-    .from(units)
-    .where(and(eq(units.agencyId, agencyId), eq(units.isOccupied, true)));
+    return {
+      totalBuildings,
+      totalUnits,
+      occupiedUnits: occupied,
+      vacantUnits: totalUnits - occupied,
+      occupancyRate: totalUnits > 0 ? Math.round((occupied / totalUnits) * 100) : 0,
+      totalTenants: Number(tenantCount[0]?.count ?? 0),
+      activeTenants: Number(activeTenantCount[0]?.count ?? 0),
+      totalRentCollectedThisMonth: totalRentCollected,
+      totalOutstandingBalance: totalOutstanding,
+      totalExpectedRentThisMonth: totalExpectedRent,
+      collectionRate: totalExpectedRent > 0
+        ? Math.round((totalRentCollected / totalExpectedRent) * 100)
+        : 0,
+    };
+  },
+  ['dashboard-summary'],
+  { revalidate: 30, tags: ['dashboard'] }
+);
 
-  const [tenantCount] = await db
-    .select({ count: count() })
-    .from(tenants)
-    .where(eq(tenants.agencyId, agencyId));
+// ── 2. Building Breakdown — SINGLE QUERY (no N+1 loop) ────────────────────
 
-  const [activeTenantCount] = await db
-    .select({ count: count() })
-    .from(tenants)
-    .where(
-      and(
-        eq(tenants.agencyId, agencyId),
-        eq(tenants.status, "ACTIVE"),
-        eq(tenants.inviteStatus, "ACCEPTED")
-      )
-    );
-
-  // Rent collected this month (CREDIT entries for RENT category)
-  const [collected] = await db
-    .select({ total: sum(tenantLedger.amount) })
-    .from(tenantLedger)
-    .where(
-      and(
-        eq(tenantLedger.agencyId, agencyId),
-        eq(tenantLedger.type, "CREDIT"),
-        eq(tenantLedger.category, "RENT"),
-        gte(tenantLedger.createdAt, new Date(start)),
-        lte(tenantLedger.createdAt, new Date(end + "T23:59:59"))
-      )
-    );
-
-  // Expected rent this month: sum of rentAmount for all occupied units
-  const [expected] = await db
-    .select({ total: sum(units.rentAmount) })
-    .from(units)
-    .where(and(eq(units.agencyId, agencyId), eq(units.isOccupied, true)));
-
-  // Total outstanding balance across all tenants
-  // We calculate per-tenant balance in a subquery, then sum positive balances
-  const balanceRows = await db
-    .select({
-      tenantId: tenants.id,
-      totalDebit: sql<number>`COALESCE(SUM(CASE WHEN ${tenantLedger.type} = 'DEBIT' THEN ${tenantLedger.amount}::numeric ELSE 0 END), 0)`,
-      totalCredit: sql<number>`COALESCE(SUM(CASE WHEN ${tenantLedger.type} = 'CREDIT' THEN ${tenantLedger.amount}::numeric ELSE 0 END), 0)`,
-    })
-    .from(tenants)
-    .leftJoin(tenantLedger, eq(tenants.id, tenantLedger.tenantId))
-    .where(eq(tenants.agencyId, agencyId))
-    .groupBy(tenants.id);
-
-  const totalOutstanding = balanceRows.reduce((sum, row) => {
-    const balance = Number(row.totalDebit) - Number(row.totalCredit);
-    return sum + Math.max(0, balance);
-  }, 0);
-
-  const totalBuildings = Number(buildingCount?.count ?? 0);
-  const totalUnits = Number(unitCount?.count ?? 0);
-  const occupied = Number(occupiedCount?.count ?? 0);
-  const totalRentCollected = Number(collected?.total ?? 0);
-  const totalExpectedRent = Number(expected?.total ?? 0);
-
-  return {
-    totalBuildings,
-    totalUnits,
-    occupiedUnits: occupied,
-    vacantUnits: totalUnits - occupied,
-    occupancyRate: totalUnits > 0 ? Math.round((occupied / totalUnits) * 100) : 0,
-    totalTenants: Number(tenantCount?.count ?? 0),
-    activeTenants: Number(activeTenantCount?.count ?? 0),
-    totalRentCollectedThisMonth: totalRentCollected,
-    totalOutstandingBalance: totalOutstanding,
-    totalExpectedRentThisMonth: totalExpectedRent,
-    collectionRate: totalExpectedRent > 0
-      ? Math.round((totalRentCollected / totalExpectedRent) * 100)
-      : 0,
-  };
-}
-
-// ── 2. Building Breakdown Table ─────────────────────────────────────────────
-
+/**
+ * PHASE 2 FIX: Replaced per-building loop (N+1 queries) with single
+ * aggregation query using GROUP BY. From ~10 queries per building → 1 query total.
+ * 
+ * Uses idx_buildings_agency_id, idx_units_building_id, idx_tenant_ledger_building_id.
+ */
 export async function getBuildingBreakdown(
   agencyId: string,
   month?: string
@@ -194,91 +176,48 @@ export async function getBuildingBreakdown(
   const db = getDb();
   const { start, end } = getMonthRange(month);
 
-  // Get all buildings for this agency
-  const buildingRows = await db
+  const rows = await db
     .select({
-      id: buildings.id,
-      name: buildings.name,
+      buildingId: buildings.id,
+      buildingName: buildings.name,
       locale: buildings.locale,
+      totalUnits: sql<number>`COALESCE(COUNT(DISTINCT ${units.id}), 0)`,
+      occupiedUnits: sql<number>`COALESCE(COUNT(DISTINCT CASE WHEN ${units.isOccupied} = true THEN ${units.id} END), 0)`,
+      expectedRent: sql<number>`COALESCE(SUM(CASE WHEN ${units.isOccupied} = true THEN ${units.rentAmount}::numeric ELSE 0 END), 0)`,
+      totalRentCollected: sql<number>`COALESCE(SUM(CASE WHEN ${tenantLedger.type} = 'CREDIT' AND ${tenantLedger.category} = 'RENT' AND ${tenantLedger.createdAt} >= ${new Date(start)} AND ${tenantLedger.createdAt} <= ${new Date(end + "T23:59:59")} THEN ${tenantLedger.amount}::numeric ELSE 0 END), 0)`,
+      totalOutstanding: sql<number>`GREATEST(0, COALESCE(SUM(CASE WHEN ${tenantLedger.type} = 'DEBIT' THEN ${tenantLedger.amount}::numeric ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN ${tenantLedger.type} = 'CREDIT' THEN ${tenantLedger.amount}::numeric ELSE 0 END), 0))`,
     })
     .from(buildings)
-    .where(eq(buildings.agencyId, agencyId));
+    .leftJoin(units, eq(buildings.id, units.buildingId))
+    .leftJoin(tenants, eq(buildings.id, tenants.buildingId))
+    .leftJoin(tenantLedger, eq(tenants.id, tenantLedger.tenantId))
+    .where(eq(buildings.agencyId, agencyId))
+    .groupBy(buildings.id, buildings.name, buildings.locale)
+    .orderBy(buildings.name);
 
-  const results: BuildingBreakdown[] = [];
+  return rows.map((r) => {
+    const totalUnits = Number(r.totalUnits);
+    const occupied = Number(r.occupiedUnits);
+    const expectedRent = Number(r.expectedRent);
+    const collected = Number(r.totalRentCollected);
+    const outstanding = Number(r.totalOutstanding);
 
-  for (const b of buildingRows) {
-    // Units in this building
-    const [unitCount] = await db
-      .select({ count: count() })
-      .from(units)
-      .where(eq(units.buildingId, b.id));
-
-    const [occupiedCount] = await db
-      .select({ count: count() })
-      .from(units)
-      .where(and(eq(units.buildingId, b.id), eq(units.isOccupied, true)));
-
-    // Expected rent
-    const [expected] = await db
-      .select({ total: sum(units.rentAmount) })
-      .from(units)
-      .where(and(eq(units.buildingId, b.id), eq(units.isOccupied, true)));
-
-    // Collected rent this month
-    const [collected] = await db
-      .select({ total: sum(tenantLedger.amount) })
-      .from(tenantLedger)
-      .where(
-        and(
-          eq(tenantLedger.agencyId, agencyId),
-          eq(tenantLedger.buildingId, b.id),
-          eq(tenantLedger.type, "CREDIT"),
-          eq(tenantLedger.category, "RENT"),
-          gte(tenantLedger.createdAt, new Date(start)),
-          lte(tenantLedger.createdAt, new Date(end + "T23:59:59"))
-        )
-      );
-
-    // Outstanding balance for this building
-    const balanceRows = await db
-      .select({
-        tenantId: tenants.id,
-        totalDebit: sql<number>`COALESCE(SUM(CASE WHEN ${tenantLedger.type} = 'DEBIT' THEN ${tenantLedger.amount}::numeric ELSE 0 END), 0)`,
-        totalCredit: sql<number>`COALESCE(SUM(CASE WHEN ${tenantLedger.type} = 'CREDIT' THEN ${tenantLedger.amount}::numeric ELSE 0 END), 0)`,
-      })
-      .from(tenants)
-      .leftJoin(tenantLedger, eq(tenants.id, tenantLedger.tenantId))
-      .where(and(eq(tenants.agencyId, agencyId), eq(tenants.buildingId, b.id)))
-      .groupBy(tenants.id);
-
-    const totalOutstanding = balanceRows.reduce((sum, row) => {
-      const balance = Number(row.totalDebit) - Number(row.totalCredit);
-      return sum + Math.max(0, balance);
-    }, 0);
-
-    const totalUnits = Number(unitCount?.count ?? 0);
-    const occupied = Number(occupiedCount?.count ?? 0);
-    const expectedRent = Number(expected?.total ?? 0);
-    const collectedRent = Number(collected?.total ?? 0);
-
-    results.push({
-      buildingId: b.id,
-      buildingName: b.name,
-      locale: b.locale,
+    return {
+      buildingId: r.buildingId,
+      buildingName: r.buildingName,
+      locale: r.locale,
       totalUnits,
       occupiedUnits: occupied,
       occupancyRate: totalUnits > 0 ? Math.round((occupied / totalUnits) * 100) : 0,
-      totalRentCollected: collectedRent,
-      totalOutstanding: totalOutstanding,
-      expectedRent: expectedRent,
-      collectionRate: expectedRent > 0 ? Math.round((collectedRent / expectedRent) * 100) : 0,
-    });
-  }
-
-  return results;
+      totalRentCollected: collected,
+      totalOutstanding: outstanding,
+      expectedRent,
+      collectionRate: expectedRent > 0 ? Math.round((collected / expectedRent) * 100) : 0,
+    };
+  });
 }
 
-// ── 3. Recent Payments Feed ──────────────────────────────────────────────────
+// ── 3. Recent Payments Feed — already efficient, minor tweak ──────────────
 
 export async function getRecentPayments(
   agencyId: string,
@@ -320,8 +259,13 @@ export async function getRecentPayments(
   }));
 }
 
-// ── 4. Arrears Report (tenants with balance > 0) ────────────────────────────
+// ── 4. Arrears Report — SQL HAVING filter (not JS filter) ────────────────
 
+/**
+ * PHASE 2 FIX: Replaced JS filtering with SQL HAVING clause.
+ * PostgreSQL filters before returning rows — less data over the wire.
+ * Uses idx_tenants_agency_id + idx_tenant_ledger_tenant_id.
+ */
 export async function getArrearsReport(
   agencyId: string,
   options?: {
@@ -334,7 +278,6 @@ export async function getArrearsReport(
   const db = getDb();
   const { buildingId, minBalance = 0, sortBy = "amount", sortOrder = "desc" } = options ?? {};
 
-  // Build tenant + balance + last payment subquery
   const conditions = [eq(tenants.agencyId, agencyId), eq(tenants.status, "ACTIVE")];
   if (buildingId) conditions.push(eq(tenants.buildingId, buildingId));
 
@@ -356,35 +299,34 @@ export async function getArrearsReport(
     .innerJoin(units, eq(tenants.unitId, units.id))
     .leftJoin(tenantLedger, eq(tenants.id, tenantLedger.tenantId))
     .where(and(...conditions))
-    .groupBy(tenants.id, tenants.fullName, tenants.phone, buildings.name, units.unitNumber, units.rentAmount);
+    .groupBy(tenants.id, tenants.fullName, tenants.phone, buildings.name, units.unitNumber, units.rentAmount)
+    .having(
+      sql`COALESCE(SUM(CASE WHEN ${tenantLedger.type} = 'DEBIT' THEN ${tenantLedger.amount}::numeric ELSE 0 END), 0) - 
+          COALESCE(SUM(CASE WHEN ${tenantLedger.type} = 'CREDIT' THEN ${tenantLedger.amount}::numeric ELSE 0 END), 0) > ${minBalance}`
+    );
 
-  // Filter positive balances and map
-  let result: ArrearsTenant[] = rows
-    .map((r) => {
-      const balance = Number(r.totalDebit) - Number(r.totalCredit);
-      // Days overdue: rough estimate based on last payment vs today
-      const today = new Date();
-      const lastPayment = r.lastPaymentDate ? new Date(r.lastPaymentDate) : null;
-      const daysOverdue = lastPayment
-        ? Math.max(0, Math.floor((today.getTime() - lastPayment.getTime()) / (1000 * 60 * 60 * 24)) - 30)
-        : 30; // If never paid, assume 30 days overdue
+  let result: ArrearsTenant[] = rows.map((r) => {
+    const balance = Number(r.totalDebit) - Number(r.totalCredit);
+    const today = new Date();
+    const lastPayment = r.lastPaymentDate ? new Date(r.lastPaymentDate) : null;
+    const daysOverdue = lastPayment
+      ? Math.max(0, Math.floor((today.getTime() - lastPayment.getTime()) / (1000 * 60 * 60 * 24)) - 30)
+      : 30;
 
-      return {
-        tenantId: r.tenantId,
-        fullName: r.fullName,
-        phone: r.phone,
-        buildingName: r.buildingName,
-        unitNumber: r.unitNumber,
-        unitRent: Number(r.unitRent),
-        balance,
-        daysOverdue,
-        lastPaymentDate: r.lastPaymentDate,
-        lastPaymentAmount: r.lastPaymentAmount ? Number(r.lastPaymentAmount) : null,
-      };
-    })
-    .filter((t) => t.balance > minBalance);
+    return {
+      tenantId: r.tenantId,
+      fullName: r.fullName,
+      phone: r.phone,
+      buildingName: r.buildingName,
+      unitNumber: r.unitNumber,
+      unitRent: Number(r.unitRent),
+      balance,
+      daysOverdue,
+      lastPaymentDate: r.lastPaymentDate,
+      lastPaymentAmount: r.lastPaymentAmount ? Number(r.lastPaymentAmount) : null,
+    };
+  });
 
-  // Sort
   result.sort((a, b) => {
     const fieldA = sortBy === "amount" ? a.balance : a.daysOverdue;
     const fieldB = sortBy === "amount" ? b.balance : b.daysOverdue;
@@ -394,14 +336,12 @@ export async function getArrearsReport(
   return result;
 }
 
-// ── 5. Occupancy Trend (optional — for charts) ──────────────────────────────
+// ── 5. Occupancy Trend (placeholder for V2 charts) ────────────────────────
 
 export async function getOccupancyHistory(
   agencyId: string,
   months: number = 6
 ): Promise<{ month: string; occupied: number; vacant: number; rate: number }[]> {
-  // This is a simplified version. For true historical data you'd need a snapshots table.
-  // For now, returns current occupancy repeated (placeholder for V2).
   const db = getDb();
   const [total] = await db.select({ count: count() }).from(units).where(eq(units.agencyId, agencyId));
   const [occupied] = await db
