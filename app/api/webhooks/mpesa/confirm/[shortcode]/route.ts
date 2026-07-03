@@ -1,5 +1,5 @@
 // app/api/webhooks/mpesa/confirm/[shortcode]/route.ts
-// Confirms manual Paybill payments and inserts into ledger
+// PHASE 4 HARDENED: Confirms manual Paybill payments with IP allowlist + callback key.
 
 import { NextRequest, NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
@@ -8,8 +8,41 @@ import { tenants, buildings } from "@/db/schema";
 import { insertPaymentCredit } from "@/lib/ledger";
 import type { C2BConfirmationRequest, DarajaCallbackResponse } from "@/lib/daraja/types";
 
+// Safaricom Daraja IP ranges
+const SAFARICOM_IP_RANGES = ["197.248.", "41.215."];
+
+function isSafaricomIp(ip: string): boolean {
+  return SAFARICOM_IP_RANGES.some((range) => ip.startsWith(range));
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ shortcode: string }> }) {
   const { shortcode } = await params;
+
+  // ── PHASE 4 FIX: IP Allowlist ──
+  const forwardedFor = req.headers.get("x-forwarded-for");
+  const realIp = req.headers.get("x-real-ip");
+  const clientIp = forwardedFor?.split(",")[0]?.trim() ?? realIp ?? "unknown";
+
+  if (!isSafaricomIp(clientIp)) {
+    console.warn(`[CONFIRM] Rejected from non-Safaricom IP: ${clientIp} for shortcode ${shortcode}`);
+    const response: DarajaCallbackResponse = {
+      ResultCode: "1",
+      ResultDesc: "Rejected — Unauthorized IP",
+    };
+    return NextResponse.json(response, { status: 403 });
+  }
+
+  // ── PHASE 4 FIX: X-Callback-Key verification ──
+  const callbackKey = req.headers.get("x-callback-key");
+  const expectedKey = process.env.DARAJA_CALLBACK_KEY;
+  if (expectedKey && callbackKey !== expectedKey) {
+    console.warn(`[CONFIRM] Invalid callback key from ${clientIp}`);
+    const response: DarajaCallbackResponse = {
+      ResultCode: "1",
+      ResultDesc: "Rejected — Invalid callback key",
+    };
+    return NextResponse.json(response, { status: 403 });
+  }
 
   try {
     const body = (await req.json()) as C2BConfirmationRequest;

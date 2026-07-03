@@ -10,7 +10,7 @@
 import "dotenv/config";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import * as schema from "../db/schema";
+import * as schema from "./schema/index.ts";
 import { eq } from "drizzle-orm";
 
 // ── Types from schema ────────────────────────────────────────────
@@ -221,7 +221,6 @@ async function seed() {
         darajaConsumerSecret: `consumer_secret_${b + 1}`,
         darajaShortcode: b === 0 ? "174379" : "174380",
         darajaPasskey: `passkey_${b + 1}`,
-        agreementTemplate: `# TENANCY AGREEMENT\n\nThis agreement is made between **Nairobi Prime Properties** (the Agent) acting on behalf of **{{LANDLORD_NAME}}** (the Landlord) and **{{TENANT_NAME}}** (the Tenant).\n\n**Property:** {{BUILDING_NAME}}, Unit {{UNIT_NUMBER}}, {{BUILDING_LOCATION}}\n\n**Lease Term:** {{LEASE_START}} to {{LEASE_END}}\n\n**Monthly Rent:** KES {{RENT_AMOUNT}}\n\n**Deposit:** KES {{DEPOSIT_AMOUNT}}\n\nSigned: _________________`,
       })
       .returning();
 
@@ -350,7 +349,7 @@ async function seed() {
         depositPaid: Math.random() > 0.1,
         escalationType: Math.random() > 0.5 ? "FIXED" : "PERCENTAGE",
         escalationValue: Math.random() > 0.5 ? "2000.00" : "5.00",
-        agreementTemplate: building.agreementTemplate,
+        agreementTemplate: `# TENANCY AGREEMENT\n\nThis agreement is made between **Nairobi Prime Properties** (the Agent) acting on behalf of **{{LANDLORD_NAME}}** (the Landlord) and **{{TENANT_NAME}}** (the Tenant).\n\n**Property:** {{BUILDING_NAME}}, Unit {{UNIT_NUMBER}}, {{BUILDING_LOCATION}}\n\n**Lease Term:** {{LEASE_START}} to {{LEASE_END}}\n\n**Monthly Rent:** KES {{RENT_AMOUNT}}\n\n**Deposit:** KES {{DEPOSIT_AMOUNT}}\n\nSigned: _________________`,
         agreementGenerated: null,
         signedAt: inviteStatus === "ACCEPTED" ? new Date(startDate.getTime() + 86400000 * 3) : null,
         signedByTenantId: inviteStatus === "ACCEPTED" ? clerkUserId : null,
@@ -455,15 +454,14 @@ async function seed() {
           unitId: unit.id,
           buildingId: building.id,
           agencyId: agency.id,
-          agentClerkId: fieldAgent.clerkUserId,
+          recordedBy: fieldAgent.clerkUserId,
           utilityType: "WATER",
           previousReading: String(prevWater),
           currentReading: String(currWater),
           unitsConsumed: String(waterUnits),
           ratePerUnit: String(waterRate),
-          totalCharge: String(waterCharge),
+          amountCharged: String(waterCharge),
           billingMonth: month,
-          ledgerEntryId: null,
         });
       }
 
@@ -493,15 +491,14 @@ async function seed() {
           unitId: unit.id,
           buildingId: building.id,
           agencyId: agency.id,
-          agentClerkId: fieldAgent.clerkUserId,
+          recordedBy: fieldAgent.clerkUserId,
           utilityType: "ELECTRICITY",
           previousReading: String(prevElec),
           currentReading: String(currElec),
           unitsConsumed: String(elecUnits),
           ratePerUnit: String(elecRate),
-          totalCharge: String(elecCharge),
+          amountCharged: String(elecCharge),
           billingMonth: month,
-          ledgerEntryId: null,
         });
       }
 
@@ -565,10 +562,12 @@ async function seed() {
             checkoutRequestId: generateCheckoutRequestId(),
             merchantRequestId: generateCheckoutRequestId(),
             amount: String(paymentAmount),
-            phone: tenant.phone,
+            phoneNumber: tenant.phone,
+            billingMonth: month,
             status: "COMPLETED",
-            mpesaCode: refCode,
-            failureReason: null,
+            mpesaReceiptNumber: refCode,
+            resultCode: "0",
+            resultDesc: "The service request has been processed successfully",
             completedAt: new Date(),
           });
         }
@@ -581,6 +580,7 @@ async function seed() {
   // ── Pending Transactions ───────────────────────────────────────
   console.log("💳 Creating pending M-Pesa transactions...");
 
+  const currentMonth = formatMonth(new Date());
   const pendingTenants = tenants.slice(0, 3);
   for (const tenant of pendingTenants) {
     const unit = allUnits.find((u) => u.id === tenant.unitId)!;
@@ -594,10 +594,12 @@ async function seed() {
       checkoutRequestId: generateCheckoutRequestId(),
       merchantRequestId: generateCheckoutRequestId(),
       amount: String(rentAmount),
-      phone: tenant.phone,
+      phoneNumber: tenant.phone,
+      billingMonth: currentMonth,
       status: "PENDING",
-      mpesaCode: null,
-      failureReason: null,
+      mpesaReceiptNumber: null,
+      resultCode: null,
+      resultDesc: null,
       completedAt: null,
     });
   }
@@ -613,10 +615,12 @@ async function seed() {
     checkoutRequestId: generateCheckoutRequestId(),
     merchantRequestId: generateCheckoutRequestId(),
     amount: String(parseFloat(String(failedUnit.rentAmount))),
-    phone: failedTenant.phone,
+    phoneNumber: failedTenant.phone,
+    billingMonth: currentMonth,
     status: "FAILED",
-    mpesaCode: null,
-    failureReason: "Insufficient funds in M-Pesa account",
+    mpesaReceiptNumber: null,
+    resultCode: "400",
+    resultDesc: "Insufficient funds in M-Pesa account",
     completedAt: null,
   });
 
@@ -644,29 +648,33 @@ async function seed() {
       .values({
         tenantId: tenant.id,
         buildingId: building.id,
+        unitId: unit.id,
         agencyId: agency.id,
         title: complaintData.title,
         description: complaintData.desc,
+        category: complaintData.priority,
         priority: complaintData.priority,
+        imageUrl: i < 2 ? `https://picsum.photos/400/300?random=${i}` : null,
         status: i < 2 ? "OPEN" : i < 4 ? "IN_PROGRESS" : "RESOLVED",
-        photoUrls: i < 2 ? [`https://picsum.photos/400/300?random=${i}`] : null,
         assignedTo: i < 2 ? null : fieldAgent.clerkUserId,
         resolvedAt: i === 4 ? new Date(Date.now() - 86400000 * 2) : null,
       })
       .returning();
 
     const updates = [
-      { message: "Ticket created and logged." },
-      { message: "Assigned to field agent for inspection." },
-      { message: "Issue resolved. Tenant confirmed satisfaction." },
+      { note: "Ticket created and logged.", statusChange: "OPEN" },
+      { note: "Assigned to field agent for inspection.", statusChange: "IN_PROGRESS" },
+      { note: "Issue resolved. Tenant confirmed satisfaction.", statusChange: "RESOLVED" },
     ];
 
     const numUpdates = i === 4 ? 3 : i >= 2 ? 2 : 1;
     for (let u = 0; u < numUpdates; u++) {
       await db.insert(schema.complaintUpdates).values({
         complaintId: complaint.id,
-        authorClerkId: u === 0 ? manager.clerkUserId : fieldAgent.clerkUserId,
-        message: updates[u].message,
+        agencyId: agency.id,
+        note: updates[u].note,
+        statusChange: updates[u].statusChange,
+        updatedBy: u === 0 ? manager.clerkUserId : fieldAgent.clerkUserId,
       });
     }
   }

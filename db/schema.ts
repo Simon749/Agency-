@@ -304,6 +304,8 @@ export const pendingTransactions = pgTable("pending_transactions", {
   phone: text("phone").notNull(),
   status: transactionStatusEnum("status").default("PENDING").notNull(),
   mpesaCode: text("mpesa_code").unique(),
+  resultCode: text("result_code"),       
+  resultDesc: text("result_desc"),        
   failureReason: text("failure_reason"),
   initiatedAt: timestamp("initiated_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),

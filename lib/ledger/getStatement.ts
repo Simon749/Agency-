@@ -1,5 +1,5 @@
 // lib/ledger/getStatement.ts
-import { eq, asc } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { tenantLedger } from "@/db/schema";
 
@@ -37,154 +37,177 @@ export interface PaginatedLedgerResult {
   totalPages: number;
 }
 
-export async function getTenantStatement(tenantId: string): Promise<StatementResult> {
-  const db = getDb();
-
-  const entries = await db
-    .select()
-    .from(tenantLedger)
-    .where(eq(tenantLedger.tenantId, tenantId))
-    .orderBy(asc(tenantLedger.createdAt));
-
-  let runningBalance = 0;
-  const rows: StatementRow[] = [];
-  const monthMap = new Map<string, { debits: number; credits: number }>();
-
-  for (const entry of entries) {
-    const amount = Number(entry.amount);
-    const isDebit = entry.type === "DEBIT";
-
-    if (isDebit) {
-      runningBalance += amount;
-    } else {
-      runningBalance -= amount;
-    }
-
-    // Track monthly totals
-    const month = entry.billingMonth ?? "uncategorized";
-    const existing = monthMap.get(month) ?? { debits: 0, credits: 0 };
-    if (isDebit) {
-      existing.debits += amount;
-    } else {
-      existing.credits += amount;
-    }
-    monthMap.set(month, existing);
-
-    rows.push({
-      id: entry.id,
-      date: entry.createdAt,
-      description: entry.description,
-      category: entry.category,
-      type: entry.type,
-      amount,
-      runningBalance,
-      referenceCode: entry.referenceCode,
-      method: entry.method,
-      billingMonth: entry.billingMonth,
-    });
-  }
-
-  const monthlyGroups: MonthlyGroup[] = Array.from(monthMap.entries())
-    .map(([billingMonth, vals]) => ({
-      billingMonth,
-      monthDebits: vals.debits,
-      monthCredits: vals.credits,
-      monthNet: vals.debits - vals.credits,
-    }))
-    .sort((a, b) => a.billingMonth.localeCompare(b.billingMonth));
-
-  return {
-    rows,
-    monthlyGroups,
-    finalBalance: runningBalance,
-  };
-}
-
-export async function getLedgerEntriesPaginated(
+/**
+ * Get tenant statement with running balance computed via SQL window function.
+ */
+export async function getTenantStatement(
   tenantId: string,
   page: number = 1,
-  pageSize: number = 10
+  pageSize: number = 50
 ): Promise<PaginatedLedgerResult> {
   const db = getDb();
-
   const safePage = Math.max(1, page);
   const safePageSize = Math.max(1, Math.min(pageSize, 100));
   const offset = (safePage - 1) * safePageSize;
 
-  const entries = await db
-    .select()
+  const result = await db.execute(sql`
+    WITH ranked AS (
+      SELECT
+        id,
+        created_at,
+        description,
+        category,
+        type,
+        amount::numeric,
+        reference_code,
+        method,
+        billing_month,
+        SUM(CASE 
+          WHEN type = 'DEBIT' THEN amount::numeric 
+          ELSE -amount::numeric 
+        END) OVER (
+          ORDER BY created_at ASC, id ASC
+          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) as running_balance
+      FROM tenant_ledger
+      WHERE tenant_id = ${tenantId}
+    )
+    SELECT
+      id,
+      created_at as date,
+      description,
+      category,
+      type,
+      amount,
+      running_balance,
+      reference_code,
+      method,
+      billing_month
+    FROM ranked
+    ORDER BY created_at DESC, id DESC
+    LIMIT ${safePageSize} OFFSET ${offset}
+  `);
+
+  // FIX: db.execute() returns { rows: [...] } — extract the array
+  const rawRows = Array.isArray(result) ? result : (result as any).rows ?? [];
+  
+  const [{ count }] = await db
+    .select({ count: sql<number>`COUNT(*)` })
     .from(tenantLedger)
-    .where(eq(tenantLedger.tenantId, tenantId))
-    .orderBy(asc(tenantLedger.createdAt));
+    .where(eq(tenantLedger.tenantId, tenantId));
 
-  const totalCount = entries.length;
-  const totalPages = Math.max(1, Math.ceil(totalCount / safePageSize));
+  const totalCount = Number(count);
 
-  let runningBalance = 0;
-  const rows: StatementRow[] = [];
-
-  for (const [index, entry] of entries.entries()) {
-    const amount = Number(entry.amount);
-    runningBalance += entry.type === "DEBIT" ? amount : -amount;
-
-    if (index >= offset && index < offset + safePageSize) {
-      rows.push({
-        id: entry.id,
-        date: entry.createdAt,
-        description: entry.description,
-        category: entry.category,
-        type: entry.type,
-        amount,
-        runningBalance,
-        referenceCode: entry.referenceCode,
-        method: entry.method,
-        billingMonth: entry.billingMonth,
-      });
-    }
-  }
+  const formattedRows: StatementRow[] = rawRows.map((r: any) => ({
+    id: r.id,
+    date: new Date(r.date),
+    description: r.description,
+    category: r.category,
+    type: r.type as "DEBIT" | "CREDIT",
+    amount: Number(r.amount),
+    runningBalance: Number(r.running_balance),
+    referenceCode: r.reference_code,
+    method: r.method,
+    billingMonth: r.billing_month,
+  }));
 
   return {
-    rows,
+    rows: formattedRows,
     totalCount,
     page: safePage,
     pageSize: safePageSize,
-    totalPages,
+    totalPages: Math.max(1, Math.ceil(totalCount / safePageSize)),
   };
 }
 
+/**
+ * Get recent ledger entries (last N rows) — used for dashboard widgets.
+ */
 export async function getRecentLedgerEntries(
   tenantId: string,
   limit: number = 5
 ): Promise<StatementRow[]> {
   const db = getDb();
-
-  const entries = await db
-    .select()
-    .from(tenantLedger)
-    .where(eq(tenantLedger.tenantId, tenantId))
-    .orderBy(asc(tenantLedger.createdAt));
-
-  let runningBalance = 0;
-  const rows: StatementRow[] = [];
-
-  for (const entry of entries) {
-    const amount = Number(entry.amount);
-    runningBalance += entry.type === "DEBIT" ? amount : -amount;
-
-    rows.push({
-      id: entry.id,
-      date: entry.createdAt,
-      description: entry.description,
-      category: entry.category,
-      type: entry.type,
+  const result = await db.execute(sql`
+    WITH ranked AS (
+      SELECT
+        id,
+        created_at,
+        description,
+        category,
+        type,
+        amount::numeric,
+        reference_code,
+        method,
+        billing_month,
+        SUM(CASE 
+          WHEN type = 'DEBIT' THEN amount::numeric 
+          ELSE -amount::numeric 
+        END) OVER (
+          ORDER BY created_at ASC, id ASC
+          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) as running_balance
+      FROM tenant_ledger
+      WHERE tenant_id = ${tenantId}
+    )
+    SELECT
+      id,
+      created_at as date,
+      description,
+      category,
+      type,
       amount,
-      runningBalance,
-      referenceCode: entry.referenceCode,
-      method: entry.method,
-      billingMonth: entry.billingMonth,
-    });
-  }
+      running_balance,
+      reference_code,
+      method,
+      billing_month
+    FROM ranked
+    ORDER BY created_at DESC, id DESC
+    LIMIT ${limit}
+  `);
 
-  // Return last N entries, most recent first
-  return rows.slice(-limit).reverse();
+  // FIX: same extraction pattern
+  const rawRows = Array.isArray(result) ? result : (result as any).rows ?? [];
+
+  return rawRows.map((r: any) => ({
+    id: r.id,
+    date: new Date(r.date),
+    description: r.description,
+    category: r.category,
+    type: r.type as "DEBIT" | "CREDIT",
+    amount: Number(r.amount),
+    runningBalance: Number(r.running_balance),
+    referenceCode: r.reference_code,
+    method: r.method,
+    billingMonth: r.billing_month,
+  }));
+}
+
+/**
+ * Get monthly summary groups — also SQL-aggregated for performance.
+ */
+export async function getMonthlySummary(tenantId: string) {
+  const db = getDb();
+
+  const result = await db.execute(sql`
+    SELECT
+      billing_month,
+      COALESCE(SUM(CASE WHEN type = 'DEBIT' THEN amount::numeric ELSE 0 END), 0) as month_debits,
+      COALESCE(SUM(CASE WHEN type = 'CREDIT' THEN amount::numeric ELSE 0 END), 0) as month_credits,
+      COALESCE(SUM(CASE WHEN type = 'DEBIT' THEN amount::numeric ELSE -amount::numeric END), 0) as month_net
+    FROM tenant_ledger
+    WHERE tenant_id = ${tenantId} AND billing_month IS NOT NULL
+    GROUP BY billing_month
+    ORDER BY billing_month ASC
+  `);
+
+  // FIX: same extraction pattern
+  const rawRows = Array.isArray(result) ? result : (result as any).rows ?? [];
+
+  return rawRows.map((r: any) => ({
+    billingMonth: r.billing_month as string,
+    monthDebits: Number(r.month_debits),
+    monthCredits: Number(r.month_credits),
+    monthNet: Number(r.month_net),
+  }));
 }

@@ -1,10 +1,11 @@
 // lib/ledger/utilityBilling.ts
-// Utility billing logic — calculates charge from meter readings and inserts DEBIT.
+// PHASE 4 FIX: Ledger immutability — never UPDATE tenant_ledger.
+// When correcting a reading, we void the old charge (CREDIT reversal) and insert a new DEBIT.
 
 import { eq, and, desc } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { utilityReadings, tenantLedger, units, buildings, tenants } from "@/db/schema";
-import type { InsertUtilityReading, InsertTenantLedgerEntry } from "@/db/schema";
+import type { InsertUtilityReading } from "@/db/schema";
 
 export interface MeterReadingInput {
   unitId: string;
@@ -30,7 +31,6 @@ export interface MeterReadingResult {
 
 /**
  * Get the most recent utility reading for a unit + utility type.
- * Returns null if no previous reading exists.
  */
 export async function getLastReading(
   unitId: string,
@@ -63,15 +63,17 @@ export async function getLastReading(
 
 /**
  * Submit a meter reading, calculate charge, and bill the tenant.
- * Idempotent: if a reading already exists for this unit + type + billingMonth,
- * it updates the existing record instead of creating a duplicate.
+ *
+ * PHASE 4 FIX: If a reading already exists for this unit + type + billingMonth,
+ * we VOID the old ledger entry (insert CREDIT reversal) and create a NEW DEBIT.
+ * Never UPDATE tenant_ledger — it is append-only.
  */
 export async function submitMeterReading(
   input: MeterReadingInput
 ): Promise<MeterReadingResult> {
   const db = getDb();
 
-  // Validate
+  // ── Validation ──
   if (input.currentReading < input.previousReading) {
     throw new Error(
       `Current reading (${input.currentReading}) cannot be less than previous reading (${input.previousReading})`
@@ -81,7 +83,7 @@ export async function submitMeterReading(
   const unitsConsumed = input.currentReading - input.previousReading;
   const totalCharge = unitsConsumed * input.ratePerUnit;
 
-  // Find the tenant in this unit
+  // ── Find tenant ──
   const [tenant] = await db
     .select({
       id: tenants.id,
@@ -103,14 +105,14 @@ export async function submitMeterReading(
     throw new Error("No active tenant found in this unit");
   }
 
-  // Get unit number for display
+  // ── Get unit number ──
   const [unit] = await db
     .select({ unitNumber: units.unitNumber })
     .from(units)
     .where(eq(units.id, input.unitId))
     .limit(1);
 
-  // Check for existing reading this month (idempotency)
+  // ── Check for existing reading this month ──
   const [existing] = await db
     .select({ id: utilityReadings.id, ledgerEntryId: utilityReadings.ledgerEntryId })
     .from(utilityReadings)
@@ -127,35 +129,101 @@ export async function submitMeterReading(
   let ledgerEntryId: string;
 
   if (existing) {
-    // Update existing reading
-    await db
-      .update(utilityReadings)
-      .set({
-        previousReading: input.previousReading.toFixed(2),
-        currentReading: input.currentReading.toFixed(2),
-        unitsConsumed: unitsConsumed.toFixed(2),
-        ratePerUnit: input.ratePerUnit.toFixed(2),
-        totalCharge: totalCharge.toFixed(2),
-        agentClerkId: input.agentClerkId,
-      })
-      .where(eq(utilityReadings.id, existing.id));
+    // ═══════════════════════════════════════════════════════════════
+    // PHASE 4 FIX: Void old ledger entry + insert new one
+    // ═══════════════════════════════════════════════════════════════
+    const result = await db.transaction(async (tx) => {
+      // 1. Get old charge amount for reversal
+      let oldAmount = 0;
+      if (existing.ledgerEntryId) {
+        const [oldLedger] = await tx
+          .select({ amount: tenantLedger.amount })
+          .from(tenantLedger)
+          .where(eq(tenantLedger.id, existing.ledgerEntryId))
+          .limit(1);
+        oldAmount = Number(oldLedger?.amount ?? 0);
 
-    readingId = existing.id;
+        // 2. Insert REVERSAL CREDIT (voids old charge)
+        if (oldAmount > 0) {
+          await tx.insert(tenantLedger).values({
+            tenantId: tenant.id,
+            buildingId: input.buildingId,
+            agencyId: input.agencyId,
+            type: "CREDIT",
+            category: input.utilityType,
+            amount: oldAmount.toFixed(2),
+            description: `Reversal — corrected ${input.utilityType} reading for ${formatMonthLabel(input.billingMonth)}`,
+            billingMonth: input.billingMonth,
+            method: "SYSTEM",
+            recordedBy: input.agentClerkId,
+            referenceCode: `REV-${existing.ledgerEntryId.slice(0, 8)}`,
+          });
+        }
+      }
 
-    // Update existing ledger entry if linked
-    if (existing.ledgerEntryId) {
-      await db
-        .update(tenantLedger)
+      // 3. Update the utility_readings row with new values
+      await tx
+        .update(utilityReadings)
         .set({
-          amount: totalCharge.toFixed(2),
-          description: `${input.utilityType} — ${formatMonthLabel(input.billingMonth)} (${unitsConsumed.toFixed(2)} units @ KES ${input.ratePerUnit.toFixed(2)})`,
+          previousReading: input.previousReading.toFixed(2),
+          currentReading: input.currentReading.toFixed(2),
+          unitsConsumed: unitsConsumed.toFixed(2),
+          ratePerUnit: input.ratePerUnit.toFixed(2),
+          totalCharge: totalCharge.toFixed(2),
+          agentClerkId: input.agentClerkId,
         })
-        .where(eq(tenantLedger.id, existing.ledgerEntryId));
+        .where(eq(utilityReadings.id, existing.id));
 
-      ledgerEntryId = existing.ledgerEntryId;
-    } else {
-      // Create new ledger entry if not previously linked
-      const [ledger] = await db
+      // 4. Insert NEW DEBIT with corrected amount
+      const [newLedger] = await tx
+        .insert(tenantLedger)
+        .values({
+          tenantId: tenant.id,
+          buildingId: input.buildingId,
+          agencyId: input.agencyId,
+          type: "DEBIT",
+          category: input.utilityType,
+          amount: totalCharge.toFixed(2),
+          description: `${input.utilityType} — corrected reading for ${formatMonthLabel(input.billingMonth)} (${unitsConsumed.toFixed(2)} units @ KES ${input.ratePerUnit.toFixed(2)})`,
+          billingMonth: input.billingMonth,
+          method: "SYSTEM",
+          recordedBy: input.agentClerkId,
+          referenceCode: `CORR-${existing.id.slice(0, 8)}-${Date.now()}`,
+        })
+        .returning({ id: tenantLedger.id });
+
+      // 5. Link reading to NEW ledger entry
+      await tx
+        .update(utilityReadings)
+        .set({ ledgerEntryId: newLedger.id })
+        .where(eq(utilityReadings.id, existing.id));
+
+      return { readingId: existing.id, ledgerEntryId: newLedger.id };
+    });
+
+    readingId = result.readingId;
+    ledgerEntryId = result.ledgerEntryId;
+  } else {
+    // ── New reading ──
+    const result = await db.transaction(async (tx) => {
+      const [reading] = await tx
+        .insert(utilityReadings)
+        .values({
+          unitId: input.unitId,
+          buildingId: input.buildingId,
+          agencyId: input.agencyId,
+          agentClerkId: input.agentClerkId,
+          utilityType: input.utilityType,
+          previousReading: input.previousReading.toFixed(2),
+          currentReading: input.currentReading.toFixed(2),
+          unitsConsumed: unitsConsumed.toFixed(2),
+          ratePerUnit: input.ratePerUnit.toFixed(2),
+          totalCharge: totalCharge.toFixed(2),
+          billingMonth: input.billingMonth,
+        })
+        .returning({ id: utilityReadings.id });
+
+      const [ledger] = await tx
         .insert(tenantLedger)
         .values({
           tenantId: tenant.id,
@@ -168,62 +236,20 @@ export async function submitMeterReading(
           billingMonth: input.billingMonth,
           method: "SYSTEM",
           recordedBy: input.agentClerkId,
+          referenceCode: `RDG-${reading.id.slice(0, 8)}`,
         })
         .returning({ id: tenantLedger.id });
 
-      ledgerEntryId = ledger.id;
-
-      // Link back
-      await db
+      await tx
         .update(utilityReadings)
-        .set({ ledgerEntryId })
-        .where(eq(utilityReadings.id, readingId));
-    }
-  } else {
-    // Insert new reading
-    const [reading] = await db
-      .insert(utilityReadings)
-      .values({
-        unitId: input.unitId,
-        buildingId: input.buildingId,
-        agencyId: input.agencyId,
-        agentClerkId: input.agentClerkId,
-        utilityType: input.utilityType,
-        previousReading: input.previousReading.toFixed(2),
-        currentReading: input.currentReading.toFixed(2),
-        unitsConsumed: unitsConsumed.toFixed(2),
-        ratePerUnit: input.ratePerUnit.toFixed(2),
-        totalCharge: totalCharge.toFixed(2),
-        billingMonth: input.billingMonth,
-      })
-      .returning({ id: utilityReadings.id });
+        .set({ ledgerEntryId: ledger.id })
+        .where(eq(utilityReadings.id, reading.id));
 
-    readingId = reading.id;
+      return { readingId: reading.id, ledgerEntryId: ledger.id };
+    });
 
-    // Insert DEBIT into tenant_ledger
-    const [ledger] = await db
-      .insert(tenantLedger)
-      .values({
-        tenantId: tenant.id,
-        buildingId: input.buildingId,
-        agencyId: input.agencyId,
-        type: "DEBIT",
-        category: input.utilityType,
-        amount: totalCharge.toFixed(2),
-        description: `${input.utilityType} — ${formatMonthLabel(input.billingMonth)} (${unitsConsumed.toFixed(2)} units @ KES ${input.ratePerUnit.toFixed(2)})`,
-        billingMonth: input.billingMonth,
-        method: "SYSTEM",
-        recordedBy: input.agentClerkId,
-      })
-      .returning({ id: tenantLedger.id });
-
-    ledgerEntryId = ledger.id;
-
-    // Link reading back to ledger
-    await db
-      .update(utilityReadings)
-      .set({ ledgerEntryId })
-      .where(eq(utilityReadings.id, readingId));
+    readingId = result.readingId;
+    ledgerEntryId = result.ledgerEntryId;
   }
 
   return {

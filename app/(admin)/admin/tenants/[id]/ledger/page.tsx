@@ -8,6 +8,7 @@ import { getSessionMeta } from "@/lib/auth/getRole";
 import {
   getTenantStatement,
   getTenantBalance,
+  getMonthlySummary,
   type MonthlyGroup,
   type StatementRow,
 } from "@/lib/ledger";
@@ -17,8 +18,10 @@ import Link from "next/link";
 export default async function AdminTenantLedgerPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
+  const { id } = await params;
+
   const session = await getSessionMeta();
   const { agencyId } = session;
   if (!agencyId) redirect("/pending-setup");
@@ -29,7 +32,7 @@ export default async function AdminTenantLedgerPage({
   const [tenant] = await db
     .select()
     .from(tenants)
-    .where(and(eq(tenants.id, params.id), eq(tenants.agencyId, agencyId)));
+    .where(and(eq(tenants.id, id), eq(tenants.agencyId, agencyId)));
 
   if (!tenant) notFound();
 
@@ -45,8 +48,10 @@ export default async function AdminTenantLedgerPage({
     .where(eq(units.id, tenant.unitId))
     .limit(1);
 
-  const { rows, monthlyGroups, finalBalance } = await getTenantStatement(tenant.id);
+  const { rows } = await getTenantStatement(tenant.id);
   const balance = await getTenantBalance(tenant.id);
+  const monthlyGroups = await getMonthlySummary(tenant.id);
+  const finalBalance = balance.balance;
 
   return (
     <div>
@@ -56,7 +61,7 @@ export default async function AdminTenantLedgerPage({
 
       <div className="flex items-center gap-4 mb-8 flex-wrap">
         <Link
-          href={`/admin/tenants/${params.id}`}
+          href={`/admin/tenants/${id}`}
           className="text-sm text-white/40 hover:text-white transition"
         >
           ← Back to Tenant
