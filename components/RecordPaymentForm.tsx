@@ -1,275 +1,183 @@
 "use client";
 
-// components/RecordPaymentForm.tsx
-// Modal form for Super Admin to record subscription payments manually.
+// components/admin/RecordPaymentForm.tsx
+// PHASE 7: Replaced custom inline modal with accessible Radix Dialog
 
 import { useState } from "react";
-import { recordSubscriptionPayment } from "@/lib/super-admin/actions";
+import { useRouter } from "next/navigation";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { recordPayment } from "@/lib/ledger/actions";
 
 interface Props {
-  agencyId: string;
-  agencyName: string;
-  expectedAmount: number;
+  tenantId: string;
+  buildingId: string;
+  tenantName: string;
+  unitNumber: string;
+  currentBalance: number;
 }
 
-export function RecordPaymentForm({ agencyId, agencyName, expectedAmount }: Props) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [amount, setAmount] = useState(expectedAmount > 0 ? String(expectedAmount) : "");
-  const [method, setMethod] = useState("MPESA_PAYBILL");
-  const [reference, setReference] = useState("");
-  const [notes, setNotes] = useState("");
-  const [periodStart, setPeriodStart] = useState("");
-  const [periodEnd, setPeriodEnd] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+export function RecordPaymentForm({
+  tenantId,
+  buildingId,
+  tenantName,
+  unitNumber,
+  currentBalance,
+}: Props) {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const router = useRouter();
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setIsLoading(true);
-
-    const formData = new FormData();
-    formData.append("amount", amount);
-    formData.append("method", method);
-    formData.append("reference", reference);
-    formData.append("notes", notes);
-    formData.append("periodStart", periodStart);
-    formData.append("periodEnd", periodEnd);
+  async function handleSubmit(formData: FormData) {
+    setIsSubmitting(true);
+    setError(null);
 
     try {
-      const result = await recordSubscriptionPayment(agencyId, formData);
+      const result = await recordPayment({
+        tenantId,
+        buildingId,
+        amount: parseFloat(formData.get("amount") as string),
+        method: formData.get("method") as "CASH" | "BANK_RECEIPT" | "MPESA_STK",
+        referenceCode: (formData.get("referenceCode") as string) || undefined,
+        description: (formData.get("description") as string) || undefined,
+      });
+
       if (result.success) {
-        window.location.reload();
+        setOpen(false);
+        router.refresh();
       } else {
-        alert(result.error || "Failed to record payment");
+        setError(result.error ?? "Failed to record payment");
       }
-    } catch (err) {
-      alert("An error occurred. Please try again.");
+    } catch {
+      setError("Something went wrong. Please try again.");
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   }
 
   return (
     <>
-      <button
-        onClick={() => setIsOpen(true)}
-        style={{
-          fontSize: "11px",
-          letterSpacing: "0.12em",
-          color: "#10b981",
-          border: "1px solid rgba(16,185,129,0.4)",
-          background: "transparent",
-          padding: "6px 14px",
-          cursor: "pointer",
-          textTransform: "uppercase",
-        }}
+      <Button
+        onClick={() => setOpen(true)}
+        variant="outline"
+        size="sm"
+        className="text-xs tracking-widest uppercase"
       >
         Record Payment
-      </button>
+      </Button>
 
-      {isOpen && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            backgroundColor: "rgba(0,0,0,0.7)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: "20px",
-          }}
-          onClick={() => setIsOpen(false)}
-        >
-          <div
-            style={{
-              backgroundColor: "#0a0a0a",
-              border: "1px solid rgba(255,255,255,0.1)",
-              padding: "32px",
-              maxWidth: "480px",
-              width: "100%",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p style={{ fontSize: "11px", letterSpacing: "0.22em", color: "#10b981", textTransform: "uppercase", marginBottom: "16px" }}>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-md bg-slate-950 border-white/10 text-white">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-light tracking-tight">
               Record Payment
-            </p>
-            <h2 style={{ fontSize: "18px", fontWeight: 400, color: "#ffffff", marginBottom: "4px" }}>
-              {agencyName}
-            </h2>
-            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", marginBottom: "24px" }}>
-              Expected: KES {expectedAmount.toLocaleString("en-KE")}
-            </p>
+            </DialogTitle>
+            <DialogDescription className="text-white/55">
+              {tenantName} · Unit {unitNumber} · Current balance: KES{" "}
+              {currentBalance.toLocaleString("en-KE")}
+            </DialogDescription>
+          </DialogHeader>
 
-            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              <div>
-                <label style={{ display: "block", fontSize: "11px", letterSpacing: "0.14em", color: "rgba(255,255,255,0.45)", textTransform: "uppercase", marginBottom: "6px" }}>
-                  Amount (KES)
-                </label>
-                <input
-                  type="number"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  required
-                  style={{
-                    width: "100%",
-                    backgroundColor: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.15)",
-                    color: "#ffffff",
-                    padding: "12px 16px",
-                    fontSize: "13px",
-                    outline: "none",
-                  }}
-                />
+          <form action={handleSubmit} className="space-y-4 mt-4">
+            {error && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="bg-red-500/10 border border-red-500/30 p-3 text-sm text-red-400"
+              >
+                {error}
               </div>
+            )}
 
-              <div>
-                <label style={{ display: "block", fontSize: "11px", letterSpacing: "0.14em", color: "rgba(255,255,255,0.45)", textTransform: "uppercase", marginBottom: "6px" }}>
-                  Payment Method
-                </label>
-                <select
-                  value={method}
-                  onChange={(e) => setMethod(e.target.value)}
-                  style={{
-                    width: "100%",
-                    backgroundColor: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.15)",
-                    color: "#ffffff",
-                    padding: "12px 16px",
-                    fontSize: "13px",
-                    outline: "none",
-                  }}
-                >
-                  <option value="MPESA_PAYBILL">M-Pesa Paybill</option>
-                  <option value="BANK_TRANSFER">Bank Transfer</option>
-                  <option value="CASH">Cash</option>
-                </select>
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="amount" className="text-xs tracking-widest text-white/55 uppercase">
+                Amount (KES) *
+              </Label>
+              <Input
+                id="amount"
+                name="amount"
+                type="number"
+                step="0.01"
+                min="1"
+                max={currentBalance}
+                required
+                placeholder="e.g. 25000"
+                className="bg-white/5 border-white/15 text-white placeholder:text-white/30 focus:border-white/40"
+              />
+            </div>
 
-              <div>
-                <label style={{ display: "block", fontSize: "11px", letterSpacing: "0.14em", color: "rgba(255,255,255,0.45)", textTransform: "uppercase", marginBottom: "6px" }}>
-                  Reference Code
-                </label>
-                <input
-                  type="text"
-                  value={reference}
-                  onChange={(e) => setReference(e.target.value)}
-                  placeholder="M-Pesa confirmation code or bank slip"
-                  style={{
-                    width: "100%",
-                    backgroundColor: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.15)",
-                    color: "#ffffff",
-                    padding: "12px 16px",
-                    fontSize: "13px",
-                    outline: "none",
-                  }}
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="method" className="text-xs tracking-widest text-white/55 uppercase">
+                Payment Method *
+              </Label>
+              <select
+                id="method"
+                name="method"
+                required
+                defaultValue="CASH"
+                className="w-full px-3 py-2 bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-white/40"
+              >
+                <option value="CASH">Cash</option>
+                <option value="BANK_RECEIPT">Bank Receipt</option>
+                <option value="MPESA_STK">M-Pesa STK Push</option>
+              </select>
+            </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", letterSpacing: "0.14em", color: "rgba(255,255,255,0.45)", textTransform: "uppercase", marginBottom: "6px" }}>
-                    Period Start
-                  </label>
-                  <input
-                    type="date"
-                    value={periodStart}
-                    onChange={(e) => setPeriodStart(e.target.value)}
-                    style={{
-                      width: "100%",
-                      backgroundColor: "rgba(255,255,255,0.04)",
-                      border: "1px solid rgba(255,255,255,0.15)",
-                      color: "#ffffff",
-                      padding: "12px 16px",
-                      fontSize: "13px",
-                      outline: "none",
-                    }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", letterSpacing: "0.14em", color: "rgba(255,255,255,0.45)", textTransform: "uppercase", marginBottom: "6px" }}>
-                    Period End
-                  </label>
-                  <input
-                    type="date"
-                    value={periodEnd}
-                    onChange={(e) => setPeriodEnd(e.target.value)}
-                    style={{
-                      width: "100%",
-                      backgroundColor: "rgba(255,255,255,0.04)",
-                      border: "1px solid rgba(255,255,255,0.15)",
-                      color: "#ffffff",
-                      padding: "12px 16px",
-                      fontSize: "13px",
-                      outline: "none",
-                    }}
-                  />
-                </div>
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="referenceCode" className="text-xs tracking-widest text-white/55 uppercase">
+                Reference / Slip No.
+              </Label>
+              <Input
+                id="referenceCode"
+                name="referenceCode"
+                type="text"
+                placeholder="Leave blank for cash"
+                className="bg-white/5 border-white/15 text-white placeholder:text-white/30 focus:border-white/40"
+              />
+            </div>
 
-              <div>
-                <label style={{ display: "block", fontSize: "11px", letterSpacing: "0.14em", color: "rgba(255,255,255,0.45)", textTransform: "uppercase", marginBottom: "6px" }}>
-                  Notes
-                </label>
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="M-Pesa confirmation screenshot uploaded..."
-                  rows={3}
-                  style={{
-                    width: "100%",
-                    backgroundColor: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.15)",
-                    color: "#ffffff",
-                    padding: "12px 16px",
-                    fontSize: "13px",
-                    outline: "none",
-                    resize: "vertical",
-                  }}
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="description" className="text-xs tracking-widest text-white/55 uppercase">
+                Description
+              </Label>
+              <Input
+                id="description"
+                name="description"
+                type="text"
+                placeholder="e.g. January 2026 rent partial payment"
+                className="bg-white/5 border-white/15 text-white placeholder:text-white/30 focus:border-white/40"
+              />
+            </div>
 
-              <div style={{ display: "flex", gap: "12px", marginTop: "8px" }}>
-                <button
-                  type="button"
-                  onClick={() => setIsOpen(false)}
-                  style={{
-                    flex: 1,
-                    padding: "12px",
-                    fontSize: "12px",
-                    letterSpacing: "0.14em",
-                    textTransform: "uppercase",
-                    color: "rgba(255,255,255,0.6)",
-                    border: "1px solid rgba(255,255,255,0.2)",
-                    background: "transparent",
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  style={{
-                    flex: 1,
-                    padding: "12px",
-                    fontSize: "12px",
-                    letterSpacing: "0.14em",
-                    textTransform: "uppercase",
-                    color: "#ffffff",
-                    border: "none",
-                    backgroundColor: "#10b981",
-                    cursor: isLoading ? "not-allowed" : "pointer",
-                    opacity: isLoading ? 0.6 : 1,
-                  }}
-                >
-                  {isLoading ? "Recording…" : "Confirm Payment"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+            <div className="flex gap-3 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setOpen(false)}
+                className="flex-1 text-xs tracking-widest uppercase border-white/25 text-white/55 hover:text-white hover:border-white/50"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={isSubmitting}
+                className="flex-1 text-xs tracking-widest uppercase bg-white text-black hover:bg-white/90 disabled:opacity-50"
+              >
+                {isSubmitting ? "Recording..." : "Record Payment"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

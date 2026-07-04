@@ -1,195 +1,153 @@
+// app/(tenant)/complaints/new/page.tsx
+// File a new complaint — PHASE 7: accessible labels, aria-live, inline errors
+
 "use client";
 
-import { useState, useRef } from "react";
-import { createComplaint } from "@/lib/actions/complaints";
-import Link from "next/link";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { submitComplaint } from "./actions";
 
 export default function NewComplaintPage() {
-  const [pending, setPending] = useState(false);
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
   const [photoCount, setPhotoCount] = useState(0);
-  const formRef = useRef<HTMLFormElement>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(formData: FormData) {
-    setPending(true);
+    setIsSubmitting(true);
+    setError(null);
+
     try {
-      await createComplaint(formData);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to submit complaint");
-      setPending(false);
+      const result = await submitComplaint(formData);
+      if (result.success) {
+        router.push("/tenant/complaints");
+        router.refresh();
+      } else {
+        setError(result.error ?? "Failed to submit complaint. Please try again.");
+      }
+    } catch {
+      setError("Something went wrong. Please try again.");
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (files) setPhotoCount(Math.min(files.length, 3));
-  }
-
-  const inputStyle: React.CSSProperties = {
-    width: "100%",
-    padding: "14px 16px",
-    fontSize: "14px",
-    backgroundColor: "rgba(255,255,255,0.04)",
-    border: "1px solid rgba(255,255,255,0.12)",
-    color: "#ffffff",
-    outline: "none",
-    fontFamily: '"Helvetica Neue", sans-serif',
-  };
-
-  const labelStyle: React.CSSProperties = {
-    fontSize: "11px",
-    letterSpacing: "0.16em",
-    textTransform: "uppercase",
-    color: "rgba(255,255,255,0.45)",
-    marginBottom: "8px",
-    display: "block",
-  };
-
   return (
-    <div>
-      <div style={{ marginBottom: "32px" }}>
-        <Link
-          href="/tenant/complaints"
-          style={{
-            fontSize: "12px",
-            letterSpacing: "0.1em",
-            color: "rgba(255,255,255,0.5)",
-            textDecoration: "none",
-            textTransform: "uppercase",
-          }}
+    <div className="max-w-2xl">
+      <p className="text-xs tracking-widest text-white/55 uppercase mb-2">Tenant Portal</p>
+      <h1 className="text-3xl font-light tracking-tight text-white mb-8">File a Complaint</h1>
+
+      {/* Inline error with aria-live */}
+      {error && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="bg-red-500/10 border border-red-500/30 p-4 mb-6"
         >
-          ← Back to Complaints
-        </Link>
-      </div>
+          <p className="text-sm text-red-400">{error}</p>
+        </div>
+      )}
 
-      <p
-        style={{
-          fontSize: "11px",
-          letterSpacing: "0.22em",
-          color: "rgba(255,255,255,0.45)",
-          textTransform: "uppercase",
-          marginBottom: "12px",
-        }}
-      >
-        File a Complaint
-      </p>
-      <h1
-        style={{
-          fontSize: "clamp(24px, 3vw, 36px)",
-          fontWeight: 400,
-          letterSpacing: "-0.02em",
-          color: "#ffffff",
-          margin: "0 0 48px 0",
-        }}
-      >
-        New Complaint
-      </h1>
-
-      <form
-        ref={formRef}
-        action={handleSubmit}
-        style={{ maxWidth: "640px", display: "grid", gap: "28px" }}
-      >
-        {/* Title */}
+      <form action={handleSubmit} className="space-y-6">
         <div>
-          <label style={labelStyle}>Title</label>
+          <label
+            htmlFor="title"
+            className="block text-xs tracking-widest text-white/55 uppercase mb-2"
+          >
+            Title *
+          </label>
           <input
+            id="title"
             name="title"
             type="text"
             required
-            placeholder="e.g. Water leak in bathroom"
-            style={inputStyle}
+            maxLength={200}
+            placeholder="e.g. Leaking kitchen tap"
+            className="w-full px-4 py-3 bg-white/5 border border-white/15 text-white text-sm placeholder:text-white/30 focus:outline-none focus:border-white/40"
           />
         </div>
 
-        {/* Description */}
         <div>
-          <label style={labelStyle}>Description</label>
+          <label
+            htmlFor="description"
+            className="block text-xs tracking-widest text-white/55 uppercase mb-2"
+          >
+            Description *
+          </label>
           <textarea
+            id="description"
             name="description"
             required
             rows={5}
+            maxLength={2000}
             placeholder="Describe the issue in detail..."
-            style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6 }}
+            className="w-full px-4 py-3 bg-white/5 border border-white/15 text-white text-sm placeholder:text-white/30 focus:outline-none focus:border-white/40 resize-none"
           />
+          <p className="text-xs text-white/55 mt-1">Max 2000 characters</p>
         </div>
 
-        {/* Priority */}
         <div>
-          <label style={labelStyle}>Priority</label>
-          <select name="priority" defaultValue="AUTO" style={{ ...inputStyle, cursor: "pointer" }}>
-            <option value="AUTO" style={{ backgroundColor: "#1a1a1a" }}>Auto-detect (recommended)</option>
-            <option value="LOW" style={{ backgroundColor: "#1a1a1a" }}>Low</option>
-            <option value="MEDIUM" style={{ backgroundColor: "#1a1a1a" }}>Medium</option>
-            <option value="HIGH" style={{ backgroundColor: "#1a1a1a" }}>High</option>
-            <option value="URGENT" style={{ backgroundColor: "#1a1a1a" }}>Urgent</option>
+          <label
+            htmlFor="priority"
+            className="block text-xs tracking-widest text-white/55 uppercase mb-2"
+          >
+            Priority
+          </label>
+          <select
+            id="priority"
+            name="priority"
+            defaultValue="MEDIUM"
+            className="w-full px-4 py-3 bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-white/40"
+          >
+            <option value="LOW">Low — Non-urgent</option>
+            <option value="MEDIUM">Medium — Affects daily living</option>
+            <option value="HIGH">High — Safety or security concern</option>
+            <option value="URGENT">Urgent — Immediate attention needed</option>
           </select>
-          <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.3)", marginTop: "6px" }}>
-            We&apos;ll automatically set priority based on keywords if you choose Auto-detect.
-          </p>
         </div>
 
-        {/* Photo Upload */}
         <div>
-          <label style={labelStyle}>Photos (up to 3)</label>
+          <label
+            htmlFor="photos"
+            className="block text-xs tracking-widest text-white/55 uppercase mb-2"
+          >
+            Photos (Optional)
+          </label>
           <input
+            id="photos"
             name="photos"
             type="file"
             accept="image/*"
+            capture="environment"
             multiple
-            onChange={handleFileChange}
-            style={{
-              ...inputStyle,
-              padding: "12px 16px",
-              cursor: "pointer",
-            }}
+            max={3}
+            onChange={(e) => setPhotoCount(e.target.files?.length ?? 0)}
+            className="w-full px-4 py-3 bg-white/5 border border-white/15 text-white text-sm file:text-white/55 file:bg-transparent file:border-0 cursor-pointer"
           />
+          <p className="text-xs text-white/55 mt-1">Up to 3 photos. Tap to open camera.</p>
+          {/* aria-live photo count */}
           {photoCount > 0 && (
-            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", marginTop: "8px" }}>
+            <p aria-live="polite" className="text-xs text-white/55 mt-2">
               {photoCount} photo{photoCount > 1 ? "s" : ""} selected
             </p>
           )}
         </div>
 
-        {/* Submit */}
-        <div style={{ display: "flex", gap: "16px", marginTop: "8px" }}>
+        <div className="flex gap-4 pt-4">
           <button
-            type="submit"
-            disabled={pending}
-            style={{
-              fontSize: "12px",
-              fontWeight: 500,
-              letterSpacing: "0.16em",
-              color: "#0b0b0b",
-              backgroundColor: "#ffffff",
-              border: "1px solid #ffffff",
-              padding: "14px 32px",
-              textTransform: "uppercase",
-              fontFamily: '"Helvetica Neue", sans-serif',
-              cursor: pending ? "not-allowed" : "pointer",
-              opacity: pending ? 0.6 : 1,
-            }}
-          >
-            {pending ? "Submitting..." : "Submit Complaint"}
-          </button>
-          <Link
-            href="/tenant/complaints"
-            style={{
-              fontSize: "12px",
-              fontWeight: 500,
-              letterSpacing: "0.16em",
-              color: "rgba(255,255,255,0.6)",
-              backgroundColor: "transparent",
-              border: "1px solid rgba(255,255,255,0.2)",
-              padding: "14px 32px",
-              textTransform: "uppercase",
-              textDecoration: "none",
-              fontFamily: '"Helvetica Neue", sans-serif',
-              display: "inline-flex",
-              alignItems: "center",
-            }}
+            type="button"
+            onClick={() => router.back()}
+            className="px-6 py-3 text-xs tracking-widest uppercase text-white/55 hover:text-white border border-white/25 hover:border-white/50 transition"
           >
             Cancel
-          </Link>
+          </button>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="px-6 py-3 text-xs tracking-widest uppercase bg-white text-black hover:bg-white/90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isSubmitting ? "Submitting..." : "Submit Complaint"}
+          </button>
         </div>
       </form>
     </div>

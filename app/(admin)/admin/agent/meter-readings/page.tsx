@@ -1,6 +1,6 @@
 // app/(admin)/admin/agent/meter-readings/page.tsx
 // Field Agent — mobile-optimised meter reading entry.
-// Lists buildings the agent is assigned to, then unit → utility → reading form.
+// PHASE 7 FIXES: useFormStatus loading state, sticky submit button, accessible labels
 
 import { redirect } from "next/navigation";
 import { getSessionMeta, requireRole } from "@/lib/auth/getRole";
@@ -8,6 +8,8 @@ import { getDb } from "@/lib/db";
 import { buildings, units, tenants, buildingUtilities } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import Link from "next/link";
+import { Suspense } from "react";
+import { MeterReadingForm } from "./MeterReadingForm";
 
 export default async function MeterReadingsPage({
   searchParams,
@@ -17,7 +19,6 @@ export default async function MeterReadingsPage({
   const session = await getSessionMeta();
   const { agencyId, role, userId } = session;
 
-  // Allow AGENCY_OWNER, MANAGER, and FIELD_AGENT
   if (!["AGENCY_OWNER", "MANAGER", "FIELD_AGENT"].includes(role ?? "")) {
     redirect("/admin/dashboard");
   }
@@ -83,7 +84,7 @@ export default async function MeterReadingsPage({
         style={{
           fontSize: "11px",
           letterSpacing: "0.22em",
-          color: "rgba(255,255,255,0.45)",
+          color: "rgba(255,255,255,0.55)",
           textTransform: "uppercase",
           marginBottom: "12px",
         }}
@@ -101,7 +102,7 @@ export default async function MeterReadingsPage({
       >
         Meter Readings
       </h1>
-      <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.5)", marginBottom: "48px" }}>
+      <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.55)", marginBottom: "48px" }}>
         Log water or electricity readings. Charges are calculated and billed automatically.
       </p>
 
@@ -111,7 +112,7 @@ export default async function MeterReadingsPage({
           style={{
             fontSize: "11px",
             letterSpacing: "0.2em",
-            color: "rgba(255,255,255,0.45)",
+            color: "rgba(255,255,255,0.55)",
             textTransform: "uppercase",
             marginBottom: "16px",
             paddingBottom: "12px",
@@ -136,7 +137,7 @@ export default async function MeterReadingsPage({
               }}
             >
               <p style={{ fontSize: "14px", fontWeight: 500, margin: "0 0 4px 0" }}>{b.name}</p>
-              <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>{b.location}</p>
+              <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", margin: 0 }}>{b.location}</p>
             </Link>
           ))}
         </div>
@@ -149,7 +150,7 @@ export default async function MeterReadingsPage({
             style={{
               fontSize: "11px",
               letterSpacing: "0.2em",
-              color: "rgba(255,255,255,0.45)",
+              color: "rgba(255,255,255,0.55)",
               textTransform: "uppercase",
               marginBottom: "16px",
               paddingBottom: "12px",
@@ -168,13 +169,13 @@ export default async function MeterReadingsPage({
                   backgroundColor: params.unitId === u.id ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)",
                   border: params.unitId === u.id ? "1px solid rgba(255,255,255,0.25)" : "1px solid rgba(255,255,255,0.07)",
                   textDecoration: "none",
-                  color: u.isOccupied ? "#ffffff" : "rgba(255,255,255,0.35)",
+                  color: u.isOccupied ? "#ffffff" : "rgba(255,255,255,0.55)",
                   display: "block",
                   textAlign: "center",
                 }}
               >
                 <p style={{ fontSize: "16px", fontWeight: 500, margin: "0 0 4px 0" }}>{u.unitNumber}</p>
-                <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: 0, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.55)", margin: 0, textTransform: "uppercase", letterSpacing: "0.1em" }}>
                   {u.type ?? "Unit"} · {u.isOccupied ? "Occupied" : "Vacant"}
                 </p>
               </Link>
@@ -190,7 +191,7 @@ export default async function MeterReadingsPage({
             style={{
               fontSize: "11px",
               letterSpacing: "0.2em",
-              color: "rgba(255,255,255,0.45)",
+              color: "rgba(255,255,255,0.55)",
               textTransform: "uppercase",
               marginBottom: "16px",
               paddingBottom: "12px",
@@ -216,7 +217,7 @@ export default async function MeterReadingsPage({
                 }}
               >
                 <p style={{ fontSize: "18px", fontWeight: 500, margin: "0 0 8px 0" }}>💧 Water</p>
-                <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>Log water meter reading</p>
+                <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", margin: 0 }}>Log water meter reading</p>
               </Link>
               <Link
                 href={`/admin/agent/meter-readings?buildingId=${params.buildingId}&unitId=${params.unitId}&utility=ELECTRICITY`}
@@ -231,195 +232,23 @@ export default async function MeterReadingsPage({
                 }}
               >
                 <p style={{ fontSize: "18px", fontWeight: 500, margin: "0 0 8px 0" }}>⚡ Electricity</p>
-                <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>Log electricity meter reading</p>
+                <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", margin: 0 }}>Log electricity meter reading</p>
               </Link>
             </div>
           )}
 
-          {/* Reading Form */}
+          {/* Reading Form — now a client component for pending state */}
           {params.utility && (params.utility === "WATER" || params.utility === "ELECTRICITY") && (
-            <div
-              style={{
-                backgroundColor: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.07)",
-                padding: "28px",
-              }}
-            >
-              <div style={{ marginBottom: "24px" }}>
-                <p style={{ fontSize: "14px", color: "#ffffff", margin: "0 0 4px 0" }}>
-                  {tenantName ? tenantName : "No active tenant"} · Unit {unitNumber}
-                </p>
-                <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
-                  {params.utility} · {formatMonthLabel(currentMonth)}
-                </p>
-              </div>
-
-              {tenantName ? (
-                <form action={submitReading}>
-                  <input type="hidden" name="buildingId" value={params.buildingId} />
-                  <input type="hidden" name="unitId" value={params.unitId} />
-                  <input type="hidden" name="utilityType" value={params.utility} />
-                  <input type="hidden" name="billingMonth" value={currentMonth} />
-                  <input type="hidden" name="agentClerkId" value={userId} />
-
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                      gap: "20px",
-                      marginBottom: "24px",
-                    }}
-                  >
-                    <div>
-                      <label
-                        style={{
-                          fontSize: "11px",
-                          letterSpacing: "0.18em",
-                          color: "rgba(255,255,255,0.5)",
-                          textTransform: "uppercase",
-                          display: "block",
-                          marginBottom: "8px",
-                        }}
-                      >
-                        Previous Reading
-                      </label>
-                      <input
-                        type="number"
-                        name="previousReading"
-                        defaultValue={previousReading?.currentReading ?? ""}
-                        step="0.01"
-                        required
-                        placeholder={previousReading ? String(previousReading.currentReading) : "Enter previous reading"}
-                        style={{
-                          width: "100%",
-                          padding: "12px",
-                          fontSize: "16px",
-                          backgroundColor: "rgba(255,255,255,0.05)",
-                          color: "#ffffff",
-                          border: "1px solid rgba(255,255,255,0.15)",
-                          fontFamily: "inherit",
-                        }}
-                      />
-                      {previousReading && (
-                        <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.35)", marginTop: "6px" }}>
-                          Auto-filled from last reading
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label
-                        style={{
-                          fontSize: "11px",
-                          letterSpacing: "0.18em",
-                          color: "rgba(255,255,255,0.5)",
-                          textTransform: "uppercase",
-                          display: "block",
-                          marginBottom: "8px",
-                        }}
-                      >
-                        Current Reading
-                      </label>
-                      <input
-                        type="number"
-                        name="currentReading"
-                        step="0.01"
-                        required
-                        placeholder="Enter current reading"
-                        style={{
-                          width: "100%",
-                          padding: "12px",
-                          fontSize: "16px",
-                          backgroundColor: "rgba(255,255,255,0.05)",
-                          color: "#ffffff",
-                          border: "1px solid rgba(255,255,255,0.15)",
-                          fontFamily: "inherit",
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <label
-                        style={{
-                          fontSize: "11px",
-                          letterSpacing: "0.18em",
-                          color: "rgba(255,255,255,0.5)",
-                          textTransform: "uppercase",
-                          display: "block",
-                          marginBottom: "8px",
-                        }}
-                      >
-                        Rate per Unit (KES)
-                      </label>
-                      <input
-                        type="number"
-                        name="ratePerUnit"
-                        defaultValue={previousReading?.ratePerUnit ?? ""}
-                        step="0.01"
-                        required
-                        placeholder="e.g. 50.00"
-                        style={{
-                          width: "100%",
-                          padding: "12px",
-                          fontSize: "16px",
-                          backgroundColor: "rgba(255,255,255,0.05)",
-                          color: "#ffffff",
-                          border: "1px solid rgba(255,255,255,0.15)",
-                          fontFamily: "inherit",
-                        }}
-                      />
-                      {previousReading && (
-                        <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.35)", marginTop: "6px" }}>
-                          Auto-filled from last rate
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Live Calculation Preview */}
-                  <div
-                    id="calculation-preview"
-                    style={{
-                      backgroundColor: "rgba(255,255,255,0.02)",
-                      border: "1px solid rgba(255,255,255,0.05)",
-                      padding: "16px",
-                      marginBottom: "24px",
-                      display: "none",
-                    }}
-                  >
-                    <p style={{ fontSize: "11px", letterSpacing: "0.18em", color: "rgba(255,255,255,0.5)", textTransform: "uppercase", marginBottom: "8px" }}>
-                      Charge Preview
-                    </p>
-                    <p style={{ fontSize: "14px", color: "#ffffff", margin: 0 }} id="preview-text">
-                      —
-                    </p>
-                  </div>
-
-                  <button
-                    type="submit"
-                    style={{
-                      width: "100%",
-                      padding: "16px 24px",
-                      fontSize: "13px",
-                      fontWeight: 500,
-                      letterSpacing: "0.16em",
-                      color: "#0b0b0b",
-                      backgroundColor: "#ffffff",
-                      border: "1px solid #ffffff",
-                      cursor: "pointer",
-                      textTransform: "uppercase",
-                      fontFamily: '"Helvetica Neue", sans-serif',
-                    }}
-                  >
-                    Submit Reading & Bill Tenant
-                  </button>
-                </form>
-              ) : (
-                <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.4)", textAlign: "center", padding: "20px" }}>
-                  This unit is vacant. No tenant to bill.
-                </p>
-              )}
-            </div>
+            <MeterReadingForm
+              buildingId={params.buildingId}
+              unitId={params.unitId}
+              utility={params.utility}
+              tenantName={tenantName}
+              unitNumber={unitNumber}
+              previousReading={previousReading}
+              currentMonth={currentMonth}
+              agentClerkId={userId}
+            />
           )}
         </section>
       )}
@@ -430,53 +259,6 @@ export default async function MeterReadingsPage({
       )}
     </div>
   );
-}
-
-// ── Server Action ─────────────────────────────────────────────────────────
-
-async function submitReading(formData: FormData) {
-  "use server";
-
-  const session = await getSessionMeta();
-  if (!["AGENCY_OWNER", "MANAGER", "FIELD_AGENT"].includes(session.role ?? "")) {
-    throw new Error("Unauthorized");
-  }
-
-  const { submitMeterReading } = await import("@/lib/ledger/utilityBilling");
-
-  const buildingId = formData.get("buildingId") as string;
-  const unitId = formData.get("unitId") as string;
-  const utilityType = formData.get("utilityType") as "WATER" | "ELECTRICITY";
-  const previousReading = parseFloat(formData.get("previousReading") as string);
-  const currentReading = parseFloat(formData.get("currentReading") as string);
-  const ratePerUnit = parseFloat(formData.get("ratePerUnit") as string);
-  const billingMonth = formData.get("billingMonth") as string;
-  const agentClerkId = formData.get("agentClerkId") as string;
-
-  if (!buildingId || !unitId || !utilityType || !billingMonth || !agentClerkId) {
-    throw new Error("Missing required fields");
-  }
-
-  if (currentReading < previousReading) {
-    throw new Error("Current reading cannot be less than previous reading");
-  }
-
-  const result = await submitMeterReading({
-    unitId,
-    buildingId,
-    agencyId: session.agencyId!,
-    agentClerkId,
-    utilityType,
-    previousReading,
-    currentReading,
-    ratePerUnit,
-    billingMonth,
-  });
-
-  // Revalidate to show updated history
-  // Note: In practice you'd use a more targeted revalidation
-  // For now we rely on the user navigating back or refreshing
-  console.log("[Meter Reading] Submitted:", result);
 }
 
 // ── Reading History Component ─────────────────────────────────────────────
@@ -497,7 +279,7 @@ async function ReadingHistory({
         style={{
           fontSize: "11px",
           letterSpacing: "0.2em",
-          color: "rgba(255,255,255,0.45)",
+          color: "rgba(255,255,255,0.55)",
           textTransform: "uppercase",
           marginBottom: "16px",
           paddingBottom: "12px",
@@ -508,7 +290,7 @@ async function ReadingHistory({
       </p>
 
       {history.length === 0 ? (
-        <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.4)", padding: "20px 0" }}>
+        <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.55)", padding: "20px 0" }}>
           No previous readings for this unit.
         </p>
       ) : (
@@ -529,13 +311,13 @@ async function ReadingHistory({
               <span style={{ fontSize: "13px", color: "#ffffff" }}>
                 {formatMonthLabel(row.billingMonth)}
               </span>
-              <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", textAlign: "right" }}>
+              <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", textAlign: "right" }}>
                 {Number(row.previousReading).toFixed(2)} → {Number(row.currentReading).toFixed(2)}
               </span>
-              <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", textAlign: "right" }}>
+              <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", textAlign: "right" }}>
                 {Number(row.unitsConsumed).toFixed(2)} units
               </span>
-              <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", textAlign: "right" }}>
+              <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", textAlign: "right" }}>
                 @ KES {Number(row.ratePerUnit).toFixed(2)}
               </span>
               <span style={{ fontSize: "13px", color: "#f87171", textAlign: "right", fontWeight: 500 }}>

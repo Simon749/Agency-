@@ -47,7 +47,7 @@ export default async function TenantDashboardPage() {
   return (
     <div className="space-y-8">
       <div>
-        <p className="text-xs tracking-widest text-white/40 uppercase mb-2">Tenant Portal</p>
+        <p className="text-xs tracking-widest text-white/55 uppercase mb-2">Tenant Portal</p>
         <h1 className="text-3xl font-light tracking-tight text-white">
           Welcome, {tenant.fullName}
         </h1>
@@ -55,7 +55,7 @@ export default async function TenantDashboardPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
         <div className="bg-white/[0.03] border border-white/[0.07] p-6">
-          <p className="text-xs tracking-widest text-white/40 uppercase mb-4">Outstanding Balance</p>
+          <p className="text-xs tracking-widest text-white/55 uppercase mb-4">Outstanding Balance</p>
           <p className={`text-4xl font-light tracking-tight ${balance.balance > 0 ? 'text-red-400' : 'text-green-400'}`}>
             KES {balance.balance.toLocaleString('en-KE')}
           </p>
@@ -67,14 +67,14 @@ export default async function TenantDashboardPage() {
         </div>
 
         <div className="bg-white/[0.03] border border-white/[0.07] p-6">
-          <p className="text-xs tracking-widest text-white/40 uppercase mb-4">Total Charged</p>
+          <p className="text-xs tracking-widest text-white/55 uppercase mb-4">Total Charged</p>
           <p className="text-4xl font-light tracking-tight text-white">
             KES {balance.totalCharged.toLocaleString('en-KE')}
           </p>
         </div>
 
         <div className="bg-white/[0.03] border border-white/[0.07] p-6">
-          <p className="text-xs tracking-widest text-white/40 uppercase mb-4">Total Paid</p>
+          <p className="text-xs tracking-widest text-white/55 uppercase mb-4">Total Paid</p>
           <p className="text-4xl font-light tracking-tight text-green-400">
             KES {balance.totalPaid.toLocaleString('en-KE')}
           </p>
@@ -82,7 +82,7 @@ export default async function TenantDashboardPage() {
       </div>
 
       <div className="bg-white/[0.03] border border-white/[0.07] p-6">
-        <p className="text-xs tracking-widest text-white/40 uppercase mb-4">Property Details</p>
+        <p className="text-xs tracking-widest text-white/55 uppercase mb-4">Property Details</p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
           <InfoItem label="Building" value={building?.name ?? '—'} />
           <InfoItem label="Unit" value={unit?.unitNumber ?? '—'} />
@@ -93,14 +93,14 @@ export default async function TenantDashboardPage() {
 
       <div>
         <div className="flex items-center justify-between mb-4 pb-3 border-b border-white/10">
-          <p className="text-xs tracking-widest text-white/40 uppercase">Recent Activity</p>
-          <Link href="/tenant/statement" className="text-xs tracking-widest text-white/50 hover:text-white uppercase transition">
+          <p className="text-xs tracking-widest text-white/55 uppercase">Recent Activity</p>
+          <Link href="/tenant/statement" className="text-xs tracking-widest text-white/55 hover:text-white uppercase transition">
             Full Statement →
           </Link>
         </div>
 
         {recentEntries.length === 0 ? (
-          <p className="text-sm text-white/40 py-4">No transactions yet.</p>
+          <p className="text-sm text-white/55 py-4">No transactions yet.</p>
         ) : (
           <div className="space-y-px">
             {recentEntries.map((entry: {
@@ -114,14 +114,14 @@ export default async function TenantDashboardPage() {
                   </span>
                   <div>
                     <p className="text-sm text-white">{entry.description ?? entry.category}</p>
-                    <p className="text-xs text-white/40">
+                    <p className="text-xs text-white/55">
                       {entry.date.toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}
                       {entry.referenceCode && ` • Ref: ${entry.referenceCode}`}
                     </p>
                   </div>
                 </div>
                 <span className={`text-sm font-medium ${entry.type === 'DEBIT' ? 'text-red-400' : 'text-green-400'}`}>
-                  {entry.type === 'DEBIT' ? '+' : '-'} KES {entry.amount.toLocaleString('en-KE')}
+                  {entry.type === 'DEBIT' ? '-' : '+'} KES {entry.amount.toLocaleString('en-KE')}
                 </span>
               </div>
             ))}
@@ -135,7 +135,7 @@ export default async function TenantDashboardPage() {
 function InfoItem({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="text-xs text-white/40 uppercase tracking-wider mb-1">{label}</p>
+      <p className="text-xs text-white/55 uppercase tracking-wider mb-1">{label}</p>
       <p className="text-sm text-white">{value}</p>
     </div>
   );

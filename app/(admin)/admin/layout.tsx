@@ -4,6 +4,7 @@ import { requireRole } from "@/lib/auth/getRole";
 import { ResponsiveNavbar } from "@/components/ResponsiveNavbar";
 import Link from "next/link";
 import Loading from "@/app/loading";
+import { OfflineBanner } from "@/components/OfflineBanner";
 
 const allNavItems = [
   { href: "/admin/dashboard", label: "Dashboard", roles: ["AGENCY_OWNER", "MANAGER"] },
@@ -61,6 +62,7 @@ async function LayoutContent({ children }: { children: React.ReactNode }) {
           </aside>
 
           <main className="flex-1 px-4 py-6 md:px-8 md:py-10">{children}</main>
+          <OfflineBanner />
         </div>
       </div>
     </>

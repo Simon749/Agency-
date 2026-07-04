@@ -52,17 +52,17 @@ export default async function TenantPayPage() {
       <h1 className="text-2xl font-bold">Pay Rent</h1>
 
       <div className="bg-white rounded-lg border p-6 space-y-4 shadow-sm">
-        <div className="flex justify-between text-sm text-gray-500">
+        <div className="flex justify-between text-sm text-gray-600">
           <span>Building</span>
           <span className="font-medium text-gray-900">{building?.name}</span>
         </div>
-        <div className="flex justify-between text-sm text-gray-500">
+        <div className="flex justify-between text-sm text-gray-600">
           <span>Unit</span>
           <span className="font-medium text-gray-900">{unit?.unitNumber}</span>
         </div>
 
         <div className="border-t pt-4">
-          <p className="text-sm text-gray-500">Outstanding Balance</p>
+          <p className="text-sm text-gray-600">Outstanding Balance</p>
           <p
             className={`text-3xl font-bold ${
               balance.balance > 0 ? "text-red-600" : "text-green-600"
@@ -72,7 +72,7 @@ export default async function TenantPayPage() {
           </p>
         </div>
 
-        <div className="text-xs text-gray-400 space-y-1">
+        <div className="text-xs text-gray-500 space-y-1">
           <p>Total Charged: KES {balance.totalCharged.toLocaleString("en-KE")}</p>
           <p>Total Paid: KES {balance.totalPaid.toLocaleString("en-KE")}</p>
         </div>

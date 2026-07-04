@@ -17,6 +17,23 @@ interface InitiatePaymentInput {
   amount: number; unitNumber: string;
 }
 
+function mapInternalErrorToUserMessage(error: string): string {
+  // Don't leak internal details to the tenant
+  if (error.includes("Daraja credentials not configured"))
+    return "M-Pesa is temporarily unavailable. Please try again later.";
+  if (error.includes("Daraja token error") || error.includes("401") || error.includes("403"))
+    return "M-Pesa service is experiencing issues. Please try again in a few minutes.";
+  if (error.includes("shortcode") || error.includes("passkey"))
+    return "Payment configuration error. Please contact your property manager.";
+  if (error.includes("already pending"))
+    return "A payment is already in progress. Please check your phone.";
+  if (error.includes("STK Push failed"))
+    return "M-Pesa is temporarily unavailable. Please try again later.";
+  if (error.includes("STK Push rejected"))
+    return "M-Pesa rejected the payment request. Please try again.";
+  return "Payment could not be initiated. Please try again or contact support.";
+}
+
 export async function initiatePayment(input: InitiatePaymentInput) {
   const { userId } = await auth();
   if (!userId) return { success: false, error: "Not authenticated" };
@@ -69,6 +86,7 @@ export async function initiatePayment(input: InitiatePaymentInput) {
     return { success: true, message: stkResponse.CustomerMessage ?? "Check your phone for the M-Pesa prompt." };
   } catch (err) {
     console.error("STK Push error:", err);
-    return { success: false, error: err instanceof Error ? err.message : "Failed to initiate payment" };
+    const rawMsg = err instanceof Error ? err.message : "Failed to initiate payment";
+    return { success: false, error: mapInternalErrorToUserMessage(rawMsg) };
   }
 }

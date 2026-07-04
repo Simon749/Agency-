@@ -1,6 +1,6 @@
 // app/(admin)/admin/agent/receipts/page.tsx
 // Field Agent — log cash or bank receipt payments manually.
-// Confirmation step before final submit to prevent double-entry.
+// PHASE 7 FIXES: Camera capture for bank receipts, accessible labels, htmlFor/id
 
 import { redirect } from "next/navigation";
 import { getSessionMeta } from "@/lib/auth/getRole";
@@ -49,7 +49,7 @@ export default async function ReceiptsPage({
     fullName: string;
     unitNumber: string;
     phone: string;
-    balance: number; // we'll fetch this inline
+    balance: number;
   }[] = [];
 
   if (params.buildingId) {
@@ -69,7 +69,6 @@ export default async function ReceiptsPage({
         )
       );
 
-    // Fetch unit numbers
     for (const t of rawTenants) {
       const [unit] = await db
         .select({ unitNumber: units.unitNumber })
@@ -82,12 +81,11 @@ export default async function ReceiptsPage({
         fullName: t.fullName,
         unitNumber: unit?.unitNumber ?? "—",
         phone: t.phone,
-        balance: 0, // fetched on demand or shown in confirmation
+        balance: 0,
       });
     }
   }
 
-  // Selected tenant details for confirmation
   let selectedTenant: (typeof tenantList)[0] | null = null;
   if (params.tenantId) {
     selectedTenant = tenantList.find((t) => t.id === params.tenantId) ?? null;
@@ -104,7 +102,7 @@ export default async function ReceiptsPage({
         style={{
           fontSize: "11px",
           letterSpacing: "0.22em",
-          color: "rgba(255,255,255,0.45)",
+          color: "rgba(255,255,255,0.55)",
           textTransform: "uppercase",
           marginBottom: "12px",
         }}
@@ -122,13 +120,15 @@ export default async function ReceiptsPage({
       >
         Log Manual Payment
       </h1>
-      <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.5)", marginBottom: "48px" }}>
+      <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.55)", marginBottom: "48px" }}>
         Record cash or bank payments for tenants. A confirmation step prevents double-entry.
       </p>
 
-      {/* Success / Error Banners */}
+      {/* Success / Error Banners with aria-live */}
       {isSuccess && (
         <div
+          role="status"
+          aria-live="polite"
           style={{
             backgroundColor: "rgba(74, 222, 128, 0.1)",
             border: "1px solid rgba(74, 222, 128, 0.3)",
@@ -143,6 +143,8 @@ export default async function ReceiptsPage({
       )}
       {isError && (
         <div
+          role="alert"
+          aria-live="assertive"
           style={{
             backgroundColor: "rgba(248, 113, 113, 0.1)",
             border: "1px solid rgba(248, 113, 113, 0.3)",
@@ -163,7 +165,7 @@ export default async function ReceiptsPage({
             style={{
               fontSize: "11px",
               letterSpacing: "0.2em",
-              color: "rgba(255,255,255,0.45)",
+              color: "rgba(255,255,255,0.55)",
               textTransform: "uppercase",
               marginBottom: "16px",
               paddingBottom: "12px",
@@ -187,7 +189,7 @@ export default async function ReceiptsPage({
                 }}
               >
                 <p style={{ fontSize: "14px", fontWeight: 500, margin: "0 0 4px 0" }}>{b.name}</p>
-                <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>{b.location}</p>
+                <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", margin: 0 }}>{b.location}</p>
               </Link>
             ))}
           </div>
@@ -201,7 +203,7 @@ export default async function ReceiptsPage({
             style={{
               fontSize: "11px",
               letterSpacing: "0.2em",
-              color: "rgba(255,255,255,0.45)",
+              color: "rgba(255,255,255,0.55)",
               textTransform: "uppercase",
               marginBottom: "16px",
               paddingBottom: "12px",
@@ -228,17 +230,17 @@ export default async function ReceiptsPage({
                 }}
               >
                 <span style={{ fontSize: "14px" }}>{t.fullName}</span>
-                <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", textAlign: "center" }}>
+                <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", textAlign: "center" }}>
                   Unit {t.unitNumber}
                 </span>
-                <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", textAlign: "right" }}>
+                <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", textAlign: "right" }}>
                   {t.phone}
                 </span>
               </Link>
             ))}
           </div>
           {tenantList.length === 0 && (
-            <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.4)", padding: "20px 0" }}>
+            <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.55)", padding: "20px 0" }}>
               No active tenants in this building.
             </p>
           )}
@@ -252,7 +254,7 @@ export default async function ReceiptsPage({
             style={{
               fontSize: "11px",
               letterSpacing: "0.2em",
-              color: "rgba(255,255,255,0.45)",
+              color: "rgba(255,255,255,0.55)",
               textTransform: "uppercase",
               marginBottom: "16px",
               paddingBottom: "12px",
@@ -262,7 +264,6 @@ export default async function ReceiptsPage({
             {isConfirmStep ? "3. Confirm Payment" : "3. Enter Payment Details"}
           </p>
 
-          {/* Tenant Header */}
           <div
             style={{
               backgroundColor: "rgba(255,255,255,0.03)",
@@ -274,13 +275,12 @@ export default async function ReceiptsPage({
             <p style={{ fontSize: "14px", color: "#ffffff", margin: "0 0 4px 0" }}>
               {selectedTenant.fullName} · Unit {selectedTenant.unitNumber}
             </p>
-            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
+            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", margin: 0 }}>
               {selectedTenant.phone}
             </p>
           </div>
 
           {!isConfirmStep ? (
-            /* ── Entry Form ── */
             <form
               action={async (formData: FormData) => {
                 "use server";
@@ -292,7 +292,6 @@ export default async function ReceiptsPage({
                 const billingMonth = formData.get("billingMonth") as string;
                 const description = formData.get("description") as string;
 
-                // Redirect to confirmation step with params
                 const search = new URLSearchParams({
                   buildingId,
                   tenantId,
@@ -317,13 +316,13 @@ export default async function ReceiptsPage({
                   marginBottom: "24px",
                 }}
               >
-                {/* Method */}
                 <div>
                   <label
+                    htmlFor="method"
                     style={{
                       fontSize: "11px",
                       letterSpacing: "0.18em",
-                      color: "rgba(255,255,255,0.5)",
+                      color: "rgba(255,255,255,0.55)",
                       textTransform: "uppercase",
                       display: "block",
                       marginBottom: "8px",
@@ -332,6 +331,7 @@ export default async function ReceiptsPage({
                     Payment Method *
                   </label>
                   <select
+                    id="method"
                     name="method"
                     required
                     defaultValue="CASH"
@@ -350,13 +350,13 @@ export default async function ReceiptsPage({
                   </select>
                 </div>
 
-                {/* Amount */}
                 <div>
                   <label
+                    htmlFor="amount"
                     style={{
                       fontSize: "11px",
                       letterSpacing: "0.18em",
-                      color: "rgba(255,255,255,0.5)",
+                      color: "rgba(255,255,255,0.55)",
                       textTransform: "uppercase",
                       display: "block",
                       marginBottom: "8px",
@@ -365,6 +365,7 @@ export default async function ReceiptsPage({
                     Amount (KES) *
                   </label>
                   <input
+                    id="amount"
                     type="number"
                     name="amount"
                     step="0.01"
@@ -383,13 +384,13 @@ export default async function ReceiptsPage({
                   />
                 </div>
 
-                {/* Reference Code */}
                 <div>
                   <label
+                    htmlFor="referenceCode"
                     style={{
                       fontSize: "11px",
                       letterSpacing: "0.18em",
-                      color: "rgba(255,255,255,0.5)",
+                      color: "rgba(255,255,255,0.55)",
                       textTransform: "uppercase",
                       display: "block",
                       marginBottom: "8px",
@@ -398,6 +399,7 @@ export default async function ReceiptsPage({
                     Reference / Slip No.
                   </label>
                   <input
+                    id="referenceCode"
                     type="text"
                     name="referenceCode"
                     placeholder="Leave blank for cash"
@@ -411,18 +413,18 @@ export default async function ReceiptsPage({
                       fontFamily: "inherit",
                     }}
                   />
-                  <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.35)", marginTop: "6px" }}>
+                  <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.55)", marginTop: "6px" }}>
                     Required for bank receipts. Must be unique.
                   </p>
                 </div>
 
-                {/* Billing Month */}
                 <div>
                   <label
+                    htmlFor="billingMonth"
                     style={{
                       fontSize: "11px",
                       letterSpacing: "0.18em",
-                      color: "rgba(255,255,255,0.5)",
+                      color: "rgba(255,255,255,0.55)",
                       textTransform: "uppercase",
                       display: "block",
                       marginBottom: "8px",
@@ -431,6 +433,7 @@ export default async function ReceiptsPage({
                     Billing Month *
                   </label>
                   <input
+                    id="billingMonth"
                     type="month"
                     name="billingMonth"
                     defaultValue={currentMonth}
@@ -448,13 +451,50 @@ export default async function ReceiptsPage({
                 </div>
               </div>
 
-              {/* Description */}
+              {/* PHASE 7: Camera capture for bank receipt photos */}
               <div style={{ marginBottom: "24px" }}>
                 <label
+                  htmlFor="receiptPhoto"
                   style={{
                     fontSize: "11px",
                     letterSpacing: "0.18em",
-                    color: "rgba(255,255,255,0.5)",
+                    color: "rgba(255,255,255,0.55)",
+                    textTransform: "uppercase",
+                    display: "block",
+                    marginBottom: "8px",
+                  }}
+                >
+                  Receipt Photo (Optional)
+                </label>
+                <input
+                  id="receiptPhoto"
+                  type="file"
+                  name="receiptPhoto"
+                  accept="image/*"
+                  capture="environment"
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    fontSize: "14px",
+                    backgroundColor: "rgba(255,255,255,0.05)",
+                    color: "#ffffff",
+                    border: "1px solid rgba(255,255,255,0.15)",
+                    fontFamily: "inherit",
+                    cursor: "pointer",
+                  }}
+                />
+                <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.55)", marginTop: "6px" }}>
+                  Tap to take a photo of the bank slip or receipt.
+                </p>
+              </div>
+
+              <div style={{ marginBottom: "24px" }}>
+                <label
+                  htmlFor="description"
+                  style={{
+                    fontSize: "11px",
+                    letterSpacing: "0.18em",
+                    color: "rgba(255,255,255,0.55)",
                     textTransform: "uppercase",
                     display: "block",
                     marginBottom: "8px",
@@ -463,6 +503,7 @@ export default async function ReceiptsPage({
                   Description
                 </label>
                 <input
+                  id="description"
                   type="text"
                   name="description"
                   defaultValue={`Manual payment — ${currentMonth}`}
@@ -498,7 +539,6 @@ export default async function ReceiptsPage({
               </button>
             </form>
           ) : (
-            /* ── Confirmation Step ── */
             <div>
               <div
                 style={{
@@ -512,7 +552,7 @@ export default async function ReceiptsPage({
                   style={{
                     fontSize: "11px",
                     letterSpacing: "0.2em",
-                    color: "rgba(255,255,255,0.45)",
+                    color: "rgba(255,255,255,0.55)",
                     textTransform: "uppercase",
                     marginBottom: "20px",
                     paddingBottom: "12px",
@@ -599,8 +639,6 @@ export default async function ReceiptsPage({
   );
 }
 
-// ── Server Action ─────────────────────────────────────────────────────────
-
 async function submitPayment(formData: FormData) {
   "use server";
 
@@ -644,11 +682,8 @@ async function submitPayment(formData: FormData) {
     );
   }
 
-  // Success — redirect with success flag, clear form
   redirect(`/admin/agent/receipts?buildingId=${buildingId}&success=1`);
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────
 
 function ConfirmRow({
   label,
@@ -661,7 +696,7 @@ function ConfirmRow({
 }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-      <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", letterSpacing: "0.06em" }}>
+      <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", letterSpacing: "0.06em" }}>
         {label}
       </span>
       <span
