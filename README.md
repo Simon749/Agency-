@@ -37,3 +37,19 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 atsk_c81b5cb592b2a91b422e35aff3174c20cad2f6958745f131c957df9e70bd2db67b6173dd
 
+npx drizzle-kit generate
+npx drizzle-kit migrate
+
+Remove-Item -Recurse -Force node_modules, package-lock.json
+npm install
+Get-MpComputerStatus | Select-Object IsTamperProtected, RealTimeProtectionEnabled
+Get-MpPreference | Select-Object -ExpandProperty ExclusionPath
+
+# work inside the Linux filesystem, not /mnt/c, for real performance
+cd ~
+git clone <your repo>   # or copy the project in
+cd rem
+npm install
+npx drizzle-kit push
+npm run db:seed
+

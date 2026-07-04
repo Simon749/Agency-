@@ -67,14 +67,17 @@ export function getDb(): DatabaseClient {
  * Health check: verify DB is reachable.
  * Returns true if a simple query succeeds within 5 seconds.
  */
-export async function checkDbHealth(): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
+export async function checkDbHealth(): Promise<{
+  status: string; ok: boolean; latencyMs: number; error?: string 
+}> {
   const start = Date.now();
   try {
     const db = getDb();
     await db.execute(sql`SELECT 1`);
-    return { ok: true, latencyMs: Date.now() - start };
+    return { status: "healthy", ok: true, latencyMs: Date.now() - start };
   } catch (err) {
     return {
+      status: "unhealthy",
       ok: false,
       latencyMs: Date.now() - start,
       error: err instanceof Error ? err.message : "Unknown DB error",

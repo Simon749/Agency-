@@ -53,6 +53,7 @@ export async function initiatePayment(input: InitiatePaymentInput) {
     });
 
     await db.insert(pendingTransactions).values({
+      tenantId: input.tenantId,
       agencyId: tenant.agencyId,
       buildingId: input.buildingId,
       checkoutRequestId: stkResponse.CheckoutRequestID,
