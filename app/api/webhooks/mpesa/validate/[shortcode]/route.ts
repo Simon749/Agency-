@@ -1,20 +1,48 @@
 // app/api/webhooks/mpesa/validate/[shortcode]/route.ts
-// Validates manual Paybill payments before they are processed
-
 import { NextRequest, NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { tenants, buildings } from "@/db/schema";
 import type { C2BValidationRequest, DarajaCallbackResponse } from "@/lib/daraja/types";
 
+const SAFARICOM_IP_RANGES = ["197.248.", "41.215."];
+
+function isSafaricomIp(ip: string): boolean {
+  return SAFARICOM_IP_RANGES.some((range) => ip.startsWith(range));
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ shortcode: string }> }) {
   const { shortcode } = await params;
+
+  // ── IP Allowlist ──
+  const forwardedFor = req.headers.get("x-forwarded-for");
+  const clientIp = forwardedFor?.split(",")[0]?.trim() ?? req.headers.get("x-real-ip") ?? "unknown";
+
+  if (!isSafaricomIp(clientIp)) {
+    console.warn(`[VALIDATE] Rejected from non-Safaricom IP: ${clientIp}`);
+    const response: DarajaCallbackResponse = {
+      ResultCode: "C2B00012",
+      ResultDesc: "Rejected — Unauthorized IP",
+    };
+    return NextResponse.json(response, { status: 403 });
+  }
+
+  // ── X-Callback-Key verification ──
+  const callbackKey = req.headers.get("x-callback-key");
+  const expectedKey = process.env.DARAJA_CALLBACK_KEY;
+  if (expectedKey && callbackKey !== expectedKey) {
+    console.warn(`[VALIDATE] Invalid callback key from ${clientIp}`);
+    const response: DarajaCallbackResponse = {
+      ResultCode: "C2B00012",
+      ResultDesc: "Rejected — Invalid callback key",
+    };
+    return NextResponse.json(response, { status: 403 });
+  }
 
   try {
     const body = (await req.json()) as C2BValidationRequest;
     const { BillRefNumber, BusinessShortCode } = body;
 
-    // Verify shortcode matches URL param
     if (BusinessShortCode !== shortcode) {
       const response: DarajaCallbackResponse = {
         ResultCode: "C2B00012",
@@ -25,7 +53,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sho
 
     const db = getDb();
 
-    // Find building by shortcode
     const [building] = await db
       .select()
       .from(buildings)
@@ -40,7 +67,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sho
       return NextResponse.json(response);
     }
 
-    // Verify tenant exists in this building
     const [tenant] = await db
       .select({ id: tenants.id })
       .from(tenants)
@@ -61,14 +87,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sho
       return NextResponse.json(response);
     }
 
-    // Accept
     const response: DarajaCallbackResponse = {
       ResultCode: "0",
       ResultDesc: "Accepted",
     };
     return NextResponse.json(response);
   } catch (err) {
-    console.error(`Validation error for shortcode ${shortcode}:`, err);
+    console.error(`[VALIDATE] Error for shortcode ${shortcode}:`, err);
     const response: DarajaCallbackResponse = {
       ResultCode: "C2B00016",
       ResultDesc: "Internal server error",

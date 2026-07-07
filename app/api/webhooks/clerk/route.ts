@@ -160,3 +160,4 @@ export async function POST(req: NextRequest) {
   console.log(`[clerk-webhook] Tenant linked. clerkUserId=${clerkUserId} → tenantId=${tenant.id}`);
   return NextResponse.json({ message: 'Tenant linked' }, { status: 200 });
 }
+

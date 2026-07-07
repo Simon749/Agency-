@@ -113,11 +113,10 @@ export default async function ArrearsPage({
       </div>
 
       {/* Arrears Table */}
-      <ArrearsTableClient
-        arrears={pagedArrears}
-        currentSortBy={params.sortBy ?? 'amount'}
-        currentSortOrder={params.sortOrder ?? 'desc'}
-      />
+          {/* Ensure shape matches TenantArrear by adding monthsOverdue derived from daysOverdue */}
+          <ArrearsTableClient
+            arrears={pagedArrears.map((a) => ({ ...a, monthsOverdue: Math.floor(a.daysOverdue / 30) }))}
+          />
 
       {/* Pagination */}
       {totalPages > 1 && (

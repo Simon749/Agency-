@@ -17,6 +17,9 @@ export const tenants = pgTable("tenants", {
   phone: text("phone").notNull(), // used for STK Push
   email: text("email"),
   nationalId: text("national_id"),
+  agencyName: text("agency_name").notNull(),
+  inviteToken: text("invite_token"),        // Secure random token for invite link
+  inviteExpiresAt: timestamp("invite_expires_at"),
   inviteStatus: text("invite_status").default("PENDING"), // "PENDING" | "ACCEPTED"
   status: leaseStatusEnum("status").default("ACTIVE").notNull(),
   vacatedAt: timestamp("vacated_at"),

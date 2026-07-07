@@ -26,6 +26,11 @@ interface CacheEntry {
 // Both must reference the SAME Map instance (same module singleton).
 export const agencyStatusCache = new Map<string, CacheEntry>();
 
+
+export function getCachedAgencyStatus(agencyId: string) {
+  return agencyStatusCache.get(agencyId);
+}
+
 /**
  * Force-expire the cached status for an agency.
  * The next middleware hit will re-query the DB.

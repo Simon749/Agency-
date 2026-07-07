@@ -31,7 +31,6 @@ export const categoryEnum = pgEnum("category", [
 
 export const paymentMethodEnum = pgEnum("payment_method", [
   "MPESA_STK",
-  "MPESA_PAYBILL",
   "BANK_RECEIPT",
   "CASH",
   "SYSTEM",

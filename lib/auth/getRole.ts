@@ -12,6 +12,7 @@ export type AppRole =
   | 'TENANT';
 
 export interface SessionMeta {
+  agencyName: string;
   role: AppRole | null;
   agencyId: string | null;
   buildingId: string | null;
@@ -38,6 +39,7 @@ export async function getSessionMeta(): Promise<SessionMeta> {
   return {
     userId,
     role:       (meta.role as AppRole) ?? null,
+    agencyName: meta.agencyName ?? null,
     agencyId:   meta.agencyId ?? null,
     buildingId: meta.buildingId ?? null,
     unitId:     meta.unitId ?? null,

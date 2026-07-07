@@ -12,12 +12,12 @@ export const pendingTransactions = pgTable("pending_transactions", {
   checkoutRequestId: text("checkout_request_id").unique().notNull(), // from Daraja STK Push response
   merchantRequestId: text("merchant_request_id"),
   amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
-  phoneNumber: text("phone_number").notNull(),
+  phone: text("phone").notNull(),
   billingMonth: text("billing_month").notNull(),
   status: transactionStatusEnum("status").default("PENDING").notNull(),
   resultCode: text("result_code"),   // from Daraja callback
   resultDesc: text("result_desc"),
-  mpesaReceiptNumber: text("mpesa_receipt_number"), // TransactionID on success
+  mpesaCode: text("mpesa_code"), // TransactionID on success
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

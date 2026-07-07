@@ -155,13 +155,12 @@ export function PayRentButton({ tenantId, buildingId, phone, amount, unitNumber 
           className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg transition select-none"
           style={{ touchAction: "manipulation" }}
         >
-          {status === "idle" || status === "failed" ? (
+          {status === "failed" ? (
             <span className="flex items-center justify-center gap-2">
-              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
-              Connecting to M-Pesa...
+              Try Again
             </span>
           ) : (
             `Pay KES ${amount.toLocaleString("en-KE")} via M-Pesa`

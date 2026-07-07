@@ -18,19 +18,17 @@ import { Input } from "@/components/ui/input";
 import { recordPayment } from "@/lib/ledger/actions";
 
 interface Props {
-  tenantId: string;
-  buildingId: string;
-  tenantName: string;
-  unitNumber: string;
-  currentBalance: number;
+  agencyId: string;
+  agencyName: string;
+  plan: string;
+  expectedAmount: number;
 }
 
 export function RecordPaymentForm({
-  tenantId,
-  buildingId,
-  tenantName,
-  unitNumber,
-  currentBalance,
+  agencyId,
+  agencyName,
+  plan,
+  expectedAmount,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,8 +41,8 @@ export function RecordPaymentForm({
 
     try {
       const result = await recordPayment({
-        tenantId,
-        buildingId,
+        tenantId: agencyId,
+        buildingId: agencyId,
         amount: parseFloat(formData.get("amount") as string),
         method: formData.get("method") as "CASH" | "BANK_RECEIPT" | "MPESA_STK",
         referenceCode: (formData.get("referenceCode") as string) || undefined,
@@ -82,8 +80,8 @@ export function RecordPaymentForm({
               Record Payment
             </DialogTitle>
             <DialogDescription className="text-white/55">
-              {tenantName} · Unit {unitNumber} · Current balance: KES{" "}
-              {currentBalance.toLocaleString("en-KE")}
+              {agencyName} · Plan: {plan} · Expected Amount: KES{" "}
+              {expectedAmount.toLocaleString("en-KE")}
             </DialogDescription>
           </DialogHeader>
 
@@ -108,7 +106,7 @@ export function RecordPaymentForm({
                 type="number"
                 step="0.01"
                 min="1"
-                max={currentBalance}
+                max={expectedAmount}
                 required
                 placeholder="e.g. 25000"
                 className="bg-white/5 border-white/15 text-white placeholder:text-white/30 focus:border-white/40"

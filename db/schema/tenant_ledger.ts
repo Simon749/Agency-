@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, numeric, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, numeric, timestamp, uniqueIndex  } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 import { buildings } from "./buildings";
 import { entryTypeEnum, categoryEnum, paymentMethodEnum } from "./enums";
@@ -25,7 +25,9 @@ export const tenantLedger = pgTable("tenant_ledger", {
   method: paymentMethodEnum("method").default("SYSTEM"),  // ← was "payment_method"
   recordedBy: text("recorded_by"), // Clerk user ID of staff who logged it
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  uniqueIndex("idx_ledger_reference_code").on(table.referenceCode),
+]);
 
 export type TenantLedgerEntry = typeof tenantLedger.$inferSelect;
 export type InsertTenantLedgerEntry = typeof tenantLedger.$inferInsert;

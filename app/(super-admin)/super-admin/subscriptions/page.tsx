@@ -282,8 +282,7 @@ export default async function SubscriptionsPage() {
                     <RecordPaymentForm
                       agencyId={a.id}
                       agencyName={a.name}
-                      expectedAmount={a.amountKes || 0}
-                    />
+                      expectedAmount={a.amountKes || 0} plan={""}                    />
                   </td>
                 </tr>
               ))
