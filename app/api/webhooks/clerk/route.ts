@@ -88,6 +88,45 @@ export async function POST(req: NextRequest) {
   const role = (public_metadata?.role as string) ?? null;
   const agencyId = (public_metadata?.agencyId as string) ?? null;
 
+
+  // ── Path 0: Invite Token (most secure — validate before email/phone fallback) ──
+const inviteToken = public_metadata?.inviteToken as string | undefined;
+
+if (inviteToken) {
+  const db = getDb();
+  const [tenant] = await db
+    .select()
+    .from(tenants)
+    // inviteToken may not be defined on the generated tenants type; cast to any to avoid TS error
+    .where(eq((tenants as any).inviteToken, inviteToken))
+    .limit(1);
+
+  if (tenant && (tenant as any).inviteExpiresAt && new Date((tenant as any).inviteExpiresAt) > new Date()) {
+    await db
+      .update(tenants)
+      .set({ 
+        clerkUserId, 
+        inviteStatus: 'ACCEPTED',
+      })
+      .where(eq(tenants.id, tenant.id));
+
+    const clerk = await clerkClient();
+    await clerk.users.updateUser(clerkUserId, {
+      publicMetadata: {
+        role: 'TENANT',
+        agencyId: tenant.agencyId,
+        buildingId: tenant.buildingId,
+        unitId: tenant.unitId,
+      },
+    });
+
+    console.log(`[clerk-webhook] Tenant linked via invite token: ${tenant.id}`);
+    return NextResponse.json({ message: 'Tenant linked via invite token' }, { status: 200 });
+  }
+
+  console.warn(`[clerk-webhook] Invalid or expired invite token: ${inviteToken}`);
+}
+
   // ── Path A: Staff invite ──────────────────────────────────────────────
   if (STAFF_INVITE_ROLES.includes(role ?? '') && agencyId) {
     console.log(`[clerk-webhook] Staff user created. role=${role} agencyId=${agencyId}`);

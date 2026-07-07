@@ -15,7 +15,9 @@ export const complaints = pgTable("complaints", {
   category: text("category"), // "PLUMBING" | "ELECTRICAL" | "SECURITY" | "NOISE" | "OTHER"
   status: complaintStatusEnum("status").default("OPEN").notNull(),
   priority: complaintPriorityEnum("priority").default("MEDIUM").notNull(),
-  imageUrl: text("image_url"),
+  // FIX: Changed from single "imageUrl" to "photoUrls" array to match Design.md §4.2
+  // Tenants may upload multiple photos per complaint.
+  photoUrls: text("photo_urls").array(),
   assignedTo: text("assigned_to"), // Clerk user ID of staff handling it
   resolvedAt: timestamp("resolved_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -27,9 +29,12 @@ export const complaintUpdates = pgTable("complaint_updates", {
     .references(() => complaints.id, { onDelete: "cascade" })
     .notNull(),
   agencyId: uuid("agency_id").notNull(),
-  note: text("note").notNull(),
+  // FIX: Aligned field names with Design.md §4.2
+  // "authorClerkId" instead of "updatedBy", "message" instead of "note"
+  authorClerkId: text("author_clerk_id").notNull(),
+  message: text("message").notNull(),
+  // Kept "statusChange" as it's useful for audit trail (not in Design.md but valuable)
   statusChange: complaintStatusEnum("status_change"),
-  updatedBy: text("updated_by").notNull(), // Clerk user ID
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

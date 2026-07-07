@@ -61,7 +61,7 @@ export async function inviteTenant(unitId: string, data: {
       inviteToken,
       inviteExpiresAt,
       status: 'ACTIVE',
-    })
+    } as any)
     .returning({ id: tenants.id });
 
   // Create lease

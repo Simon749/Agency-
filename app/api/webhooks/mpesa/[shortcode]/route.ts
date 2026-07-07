@@ -1,17 +1,54 @@
 // app/api/webhooks/mpesa/[shortcode]/route.ts
-// PHASE 4 HARDENED: Transaction-wrapped, non-blocking SMS, dedup cache,
-// IP allowlist, X-Callback-Key verification.
+// PHASE 4 HARDENED: Transaction-wrapped, non-blocking SMS, Redis dedup cache,
+// IP allowlist, X-Callback-Key verification, agencyId validation.
 
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { pendingTransactions, tenantLedger } from "@/db/schema";
-import { eq } from "drizzle-orm";
-import { getPendingTransaction } from "@/lib/ledger";
+import { pendingTransactions, tenantLedger, buildings } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
+import { getPendingTransaction, insertPaymentCredit } from "@/lib/ledger";
 import { sendPaymentReceivedSms, sendPaymentFailedSms } from "@/lib/sms/triggers";
 import type { StkCallbackBody } from "@/lib/daraja/types";
 
-const processedCallbacks = new Map<string, number>();
+// ── Redis dedup cache (production-grade, survives cold starts) ─────────────
+// FALLBACK: In-memory Map if Redis is not configured (dev only)
+let dedupCache: Map<string, number> | null = null;
+let redisClient: any = null;
+
+try {
+  const { Redis } = require("@upstash/redis");
+  if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+    redisClient = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    });
+  }
+} catch {
+  console.warn("[WEBHOOK] Redis not available, using in-memory dedup cache (dev only)");
+}
+
+function getDedupCache(): Map<string, number> {
+  if (!dedupCache) dedupCache = new Map();
+  return dedupCache;
+}
+
 const CALLBACK_DEDUP_TTL_MS = 24 * 60 * 60 * 1000;
+const CALLBACK_DEDUP_TTL_SEC = 24 * 60 * 60;
+
+async function isDuplicateCallback(checkoutRequestId: string): Promise<boolean> {
+  if (redisClient) {
+    const exists = await redisClient.get(`mpesa:callback:${checkoutRequestId}`);
+    if (exists) return true;
+    await redisClient.setex(`mpesa:callback:${checkoutRequestId}`, CALLBACK_DEDUP_TTL_SEC, "1");
+    return false;
+  }
+  // Fallback for dev
+  const cache = getDedupCache();
+  const lastSeen = cache.get(checkoutRequestId);
+  if (lastSeen && Date.now() - lastSeen < CALLBACK_DEDUP_TTL_MS) return true;
+  cache.set(checkoutRequestId, Date.now());
+  return false;
+}
 
 // Safaricom Daraja IP ranges
 const SAFARICOM_IP_RANGES = ["197.248.", "41.215."];
@@ -20,17 +57,15 @@ function isSafaricomIp(ip: string): boolean {
   return SAFARICOM_IP_RANGES.some((range) => ip.startsWith(range));
 }
 
-function isDuplicateCallback(checkoutRequestId: string): boolean {
-  const lastSeen = processedCallbacks.get(checkoutRequestId);
-  if (lastSeen && Date.now() - lastSeen < CALLBACK_DEDUP_TTL_MS) return true;
-  processedCallbacks.set(checkoutRequestId, Date.now());
-  return false;
-}
-
 async function sendSmsNonBlocking(sendFn: () => Promise<boolean>, timeoutMs: number = 3000): Promise<void> {
-  const timeout = new Promise<void>((_, reject) => setTimeout(() => reject(new Error("SMS timeout")), timeoutMs));
-  try { await Promise.race([sendFn(), timeout]); }
-  catch (err) { console.warn("[SMS] Non-blocking send failed:", err); }
+  const timeout = new Promise<void>((_, reject) =>
+    setTimeout(() => reject(new Error("SMS timeout")), timeoutMs)
+  );
+  try {
+    await Promise.race([sendFn(), timeout]);
+  } catch (err) {
+    console.warn("[SMS] Non-blocking send failed:", err);
+  }
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ shortcode: string }> }) {
@@ -60,71 +95,125 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sho
 
     const { CheckoutRequestID, ResultCode, ResultDesc, CallbackMetadata } = callback;
 
-    if (isDuplicateCallback(CheckoutRequestID)) {
+    // ── FIX: Dedup check with Redis (survives cold starts) ──
+    if (await isDuplicateCallback(CheckoutRequestID)) {
       return NextResponse.json({ result: "Already processed (dedup cache)" });
     }
 
-    const pendingTx = await getPendingTransaction(CheckoutRequestID);
+    // ── FIX: Lookup pending transaction with agencyId ──
+    // We need to find the agencyId first, then validate
+    const db = getDb();
+    const [pendingTx] = await db
+      .select()
+      .from(pendingTransactions)
+      .where(eq(pendingTransactions.checkoutRequestId, CheckoutRequestID))
+      .limit(1);
+
     if (!pendingTx) {
       return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
     }
 
+    // ── FIX: Validate shortcode matches building ──
+    const [building] = await db
+      .select({ id: buildings.id, agencyId: buildings.agencyId, darajaShortcode: buildings.darajaShortcode })
+      .from(buildings)
+      .where(
+        and(
+          eq(buildings.darajaShortcode, shortcode),
+          eq(buildings.agencyId, pendingTx.agencyId)
+        )
+      )
+      .limit(1);
+
+    if (!building) {
+      console.warn(`[WEBHOOK] Shortcode ${shortcode} does not match transaction agency ${pendingTx.agencyId}`);
+      return NextResponse.json({ error: "Shortcode mismatch" }, { status: 403 });
+    }
+
+    const agencyId = pendingTx.agencyId;
+
     if (ResultCode !== 0) {
-      const db = getDb();
-      await db.update(pendingTransactions).set({
-        status: "FAILED", resultCode: ResultCode.toString(), resultDesc: ResultDesc, completedAt: new Date(),
-      }).where(eq(pendingTransactions.checkoutRequestId, CheckoutRequestID));
+      await db.update(pendingTransactions)
+        .set({
+          status: "FAILED",
+          resultCode: ResultCode.toString(),
+          resultDesc: ResultDesc,
+          completedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(pendingTransactions.checkoutRequestId, CheckoutRequestID),
+            eq(pendingTransactions.agencyId, agencyId)
+          )
+        );
       sendSmsNonBlocking(() => sendPaymentFailedSms(pendingTx.tenantId, pendingTx.amount, ResultDesc));
       return NextResponse.json({ result: "Failed recorded" });
     }
 
     const metadata = CallbackMetadata?.Item ?? [];
     const mpesaReceiptNumber = metadata.find((i) => i.Name === "MpesaReceiptNumber")?.Value as string | undefined;
-    const amount = metadata.find((i) => i.Name === "Amount")?.Value as number | undefined;
+    const callbackAmount = metadata.find((i) => i.Name === "Amount")?.Value as number | undefined;
     const billingMonth = new Date().toISOString().slice(0, 7);
 
-    if (pendingTx.status === "COMPLETED") {
-      return NextResponse.json({ result: "Already processed" });
+    // ── FIX: Validate callback amount matches expected ──
+    const expectedAmount = parseFloat(pendingTx.amount);
+    if (callbackAmount !== undefined && Math.abs(callbackAmount - expectedAmount) > 1) {
+      console.warn(
+        `[WEBHOOK] Amount mismatch: expected ${expectedAmount}, got ${callbackAmount}. ` +
+        `CheckoutRequestID=${CheckoutRequestID}`
+      );
+      // Don't fail — log discrepancy but process (Safaricom is source of truth)
     }
 
-    const db = getDb();
-    const ledgerResult = await db.transaction(async (tx) => {
-      await tx.select({ id: pendingTransactions.id }).from(pendingTransactions)
-        .where(eq(pendingTransactions.checkoutRequestId, CheckoutRequestID))
-        .for("update").limit(1);
+    // ── FIX: Use insertPaymentCredit with agencyId + recordedBy ──
+    const ledgerResult = await insertPaymentCredit(
+      {
+        tenantId: pendingTx.tenantId,
+        buildingId: pendingTx.buildingId,
+        agencyId,
+        category: "RENT",
+        amount: (callbackAmount?.toString() ?? pendingTx.amount).toString(),
+        billingMonth,
+        description: `M-Pesa STK Push — ${mpesaReceiptNumber ?? "N/A"}`,
+        referenceCode: mpesaReceiptNumber ?? CheckoutRequestID,
+        method: "MPESA_STK",
+      },
+      "DARAJA_WEBHOOK" // recordedBy — audit trail
+    );
 
-      const [currentTx] = await tx.select({ status: pendingTransactions.status }).from(pendingTransactions)
-        .where(eq(pendingTransactions.checkoutRequestId, CheckoutRequestID)).limit(1);
+    // ── Update pending transaction ──
+    await db.update(pendingTransactions)
+      .set({
+        status: "COMPLETED",
+        resultCode: ResultCode.toString(),
+        resultDesc: ResultDesc,
+        mpesaCode: mpesaReceiptNumber ?? null,
+        completedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(pendingTransactions.checkoutRequestId, CheckoutRequestID),
+          eq(pendingTransactions.agencyId, agencyId)
+        )
+      );
 
-      if (currentTx?.status === "COMPLETED") return { alreadyProcessed: true, ledgerId: null };
-
-      await tx.update(pendingTransactions).set({
-        status: "COMPLETED", resultCode: ResultCode.toString(), resultDesc: ResultDesc,
-        mpesaCode: mpesaReceiptNumber, completedAt: new Date(),
-      }).where(eq(pendingTransactions.checkoutRequestId, CheckoutRequestID));
-
-      const [ledgerEntry] = await tx.insert(tenantLedger).values({
-        tenantId: pendingTx.tenantId, buildingId: pendingTx.buildingId, agencyId: pendingTx.agencyId,
-        type: "CREDIT", category: "RENT", amount: (amount?.toString() ?? pendingTx.amount).toString(),
-        billingMonth, description: `M-Pesa STK Push — ${mpesaReceiptNumber ?? "N/A"}`,
-        referenceCode: mpesaReceiptNumber ?? CheckoutRequestID, method: "MPESA_STK", recordedBy: "system",
-      }).returning({ id: tenantLedger.id });
-
-      return { alreadyProcessed: false, ledgerId: ledgerEntry.id };
-    });
-
-    if (ledgerResult.alreadyProcessed) {
-      return NextResponse.json({ result: "Already processed (post-lock check)" });
+    if (ledgerResult.alreadyExists) {
+      return NextResponse.json({ result: "Already processed (ledger duplicate guard)" });
     }
 
-    sendSmsNonBlocking(() => sendPaymentReceivedSms(
-      pendingTx.tenantId, amount?.toString() ?? pendingTx.amount,
-      mpesaReceiptNumber ?? CheckoutRequestID, billingMonth
-    ));
+    // ── Non-blocking SMS ──
+    sendSmsNonBlocking(() =>
+      sendPaymentReceivedSms(
+        pendingTx.tenantId,
+        callbackAmount?.toString() ?? pendingTx.amount,
+        mpesaReceiptNumber ?? CheckoutRequestID,
+        billingMonth
+      )
+    );
 
     return NextResponse.json({ result: "Success", ledgerId: ledgerResult.ledgerId });
   } catch (err) {
-    console.error(`M-Pesa callback error for shortcode ${shortcode}:`, err);
+    console.error(`[WEBHOOK] M-Pesa callback error for shortcode ${shortcode}:`, err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

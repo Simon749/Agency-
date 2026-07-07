@@ -34,7 +34,7 @@ export async function vacateTenant(tenantId: string) {
   if (!tenant) throw new Error('Tenant not found');
 
   // CRITICAL: Check zero balance
-  const balance = await getTenantBalance(tenantId);
+  const balance = await getTenantBalance(tenantId, agencyId!);
   if (balance.balance > 0) {
     throw new Error(
       `Cannot vacate tenant with outstanding balance of KES ${balance.balance.toLocaleString('en-KE')}. ` +
