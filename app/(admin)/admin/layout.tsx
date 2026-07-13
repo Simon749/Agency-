@@ -51,9 +51,16 @@ async function LayoutContent({ children }: { children: React.ReactNode }) {
       <ResponsiveNavbar role={role!} navItems={navItems} />
 
       <div className="pt-16">
-        <div className="md:flex">
-          {/* Desktop Sidebar */}
-          <aside className="hidden w-56 flex-shrink-0 border-r border-white/10 bg-slate-950/95 px-4 py-6 md:block">
+        <div className="flex">
+          {/* 
+            DESKTOP SIDEBAR — STICKY
+            - Fixed position on desktop (md and up)
+            - Stays visible while scrolling
+            - Full viewport height with scrollable overflow
+          */}
+          <aside 
+            className="hidden md:block md:sticky md:top-16 md:h-[calc(100vh-4rem)] md:w-56 md:flex-shrink-0 md:overflow-y-auto md:border-r md:border-white/10 md:bg-slate-950/95 md:px-4 md:py-6"
+          >
             <div className="flex flex-col gap-1">
               {navItems.map((item) => (
                 <SidebarLink key={item.href} href={item.href} label={item.label} />
@@ -61,7 +68,16 @@ async function LayoutContent({ children }: { children: React.ReactNode }) {
             </div>
           </aside>
 
-          <main className="flex-1 px-4 py-6 md:px-8 md:py-10">{children}</main>
+          {/* 
+            MAIN CONTENT
+            - Responsive padding: px-4 on mobile, md:px-8 on desktop
+            - py-6 on mobile, md:py-10 on desktop
+            - flex-1 to fill remaining space
+          */}
+          <main className="flex-1 px-4 py-6 md:px-8 md:py-10 min-w-0">
+            {children}
+          </main>
+
           <OfflineBanner />
         </div>
       </div>

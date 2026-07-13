@@ -1,7 +1,6 @@
 // lib/rate-limit.ts
-// PHASE 4: Rate limiting for all API routes and server actions.
+// PHASE 4: Rate limiting for API routes, server actions, and webhooks.
 // Uses Redis (Upstash) for production, in-memory Map for dev fallback.
-// Configurable per-route, per-role, and per-tenant.
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -23,102 +22,13 @@ try {
 // ── In-memory fallback (dev only — lost on cold starts) ────────────────────
 const memoryStore = new Map<string, { count: number; resetTime: number }>();
 
-interface RateLimitConfig {
+// ── Types ──────────────────────────────────────────────────────────────────
+
+export interface RateLimitConfig {
   windowMs: number;      // Time window in milliseconds
   maxRequests: number;   // Max requests per window
-  keyPrefix: string;     // Key prefix for Redis (e.g., "rl:ip", "rl:tenant")
-  keyExtractor: (req: NextRequest) => string; // How to identify the client
-  skipSuccessful?: boolean; // Don't count successful requests (optional)
-  customMessage?: string;
+  keyPrefix?: string;    // Key prefix for Redis (e.g., "rl:ip", "rl:stk")
 }
-
-// ── Default configs ────────────────────────────────────────────────────────
-export const RATE_LIMITS = {
-  // Public routes — generous
-  public: {
-    windowMs: 60_000,
-    maxRequests: 100,
-    keyPrefix: "rl:ip",
-    keyExtractor: (req: NextRequest) => getClientIp(req),
-    customMessage: "Too many requests. Please slow down.",
-  } as RateLimitConfig,
-
-  // Auth routes — strict (prevent brute force)
-  auth: {
-    windowMs: 60_000,
-    maxRequests: 10,
-    keyPrefix: "rl:auth",
-    keyExtractor: (req: NextRequest) => getClientIp(req),
-    customMessage: "Too many authentication attempts. Try again in 1 minute.",
-  } as RateLimitConfig,
-
-  // STK Push — very strict (prevent double-charges)
-  stkPush: {
-    windowMs: 30_000,
-    maxRequests: 1,
-    keyPrefix: "rl:stk",
-    keyExtractor: (req: NextRequest) => {
-      // Rate limit by tenantId from body, fallback to IP
-      const tenantId = extractTenantIdFromBody(req);
-      return tenantId ?? getClientIp(req);
-    },
-    customMessage: "Please wait 30 seconds before initiating another payment.",
-  } as RateLimitConfig,
-
-  // Webhook endpoints — moderate (allow Daraja retries but prevent floods)
-  webhook: {
-    windowMs: 60_000,
-    maxRequests: 60,
-    keyPrefix: "rl:wh",
-    keyExtractor: (req: NextRequest) => getClientIp(req),
-    customMessage: "Webhook rate limit exceeded.",
-  } as RateLimitConfig,
-
-  // API routes (general) — standard
-  api: {
-    windowMs: 60_000,
-    maxRequests: 60,
-    keyPrefix: "rl:api",
-    keyExtractor: (req: NextRequest) => getClientIp(req),
-    customMessage: "API rate limit exceeded. Please slow down.",
-  } as RateLimitConfig,
-
-  // Clerk webhook — strict (prevent fake events)
-  clerkWebhook: {
-    windowMs: 60_000,
-    maxRequests: 30,
-    keyPrefix: "rl:clerk",
-    keyExtractor: (req: NextRequest) => getClientIp(req),
-    customMessage: "Webhook rate limit exceeded.",
-  } as RateLimitConfig,
-
-  // Cron endpoints — very strict (only Vercel should call)
-  cron: {
-    windowMs: 60_000,
-    maxRequests: 5,
-    keyPrefix: "rl:cron",
-    keyExtractor: (req: NextRequest) => getClientIp(req),
-    customMessage: "Unauthorized cron access.",
-  } as RateLimitConfig,
-} as const;
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-function getClientIp(req: NextRequest): string {
-  const forwarded = req.headers.get("x-forwarded-for");
-  return forwarded?.split(",")[0]?.trim()
-    ?? req.headers.get("x-real-ip")
-    ?? "unknown";
-}
-
-function extractTenantIdFromBody(req: NextRequest): string | null {
-  // For STK Push: tenantId is usually in the request body
-  // This is a placeholder — actual extraction depends on your API shape
-  // In practice, extract from req.json() in the route handler before calling rate limit
-  return null;
-}
-
-// ── Core rate limiter ──────────────────────────────────────────────────────
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -128,13 +38,44 @@ export interface RateLimitResult {
   retryAfter: number;
 }
 
+// ── Pre-configured rate limits ───────────────────────────────────────────────
+
+export const RATE_LIMITS = {
+  /** Public routes — generous (100 req/min per IP) */
+  public: { windowMs: 60_000, maxRequests: 100, keyPrefix: "rl:ip" } as RateLimitConfig,
+
+  /** Auth routes — strict (10 req/min per IP, prevent brute force) */
+  auth: { windowMs: 60_000, maxRequests: 10, keyPrefix: "rl:auth" } as RateLimitConfig,
+
+  /** STK Push — very strict (1 per 30s per tenant, prevent double-charges) */
+  stkPush: { windowMs: 30_000, maxRequests: 1, keyPrefix: "rl:stk" } as RateLimitConfig,
+
+  /** Manual receipt entry — moderate (5 per 10s per agent) */
+  receiptEntry: { windowMs: 10_000, maxRequests: 5, keyPrefix: "rl:rcpt" } as RateLimitConfig,
+
+  /** Webhook endpoints — moderate (60 req/min per IP, allow Daraja retries) */
+  webhook: { windowMs: 60_000, maxRequests: 60, keyPrefix: "rl:wh" } as RateLimitConfig,
+
+  /** General API — standard (60 req/min per IP) */
+  api: { windowMs: 60_000, maxRequests: 60, keyPrefix: "rl:api" } as RateLimitConfig,
+
+  /** Clerk webhook — strict (30 req/min per IP, prevent fake events) */
+  clerkWebhook: { windowMs: 60_000, maxRequests: 30, keyPrefix: "rl:clerk" } as RateLimitConfig,
+
+  /** Cron endpoints — very strict (5 req/min per IP, only Vercel should call) */
+  cron: { windowMs: 60_000, maxRequests: 5, keyPrefix: "rl:cron" } as RateLimitConfig,
+} as const;
+
+// ── Core rate limiter (used by both middleware and server actions) ─────────
+
 export async function checkRateLimit(
-  key: string,
+  key: string,           // Unique identifier (e.g., tenantId, IP, userId)
   config: RateLimitConfig
 ): Promise<RateLimitResult> {
   const now = Date.now();
   const windowStart = now - config.windowMs;
-  const redisKey = `${config.keyPrefix}:${key}`;
+  const prefix = config.keyPrefix ?? "rl";
+  const redisKey = `${prefix}:${key}`;
 
   if (redisClient) {
     // ── Redis implementation (production) ────────────────────────────────
@@ -158,7 +99,7 @@ export async function checkRateLimit(
     };
   }
 
-  // ── In-memory fallback (dev only) ──────────────────────────────────────
+  // ── In-memory fallback (dev only) ────────────────────────────────────
   const entry = memoryStore.get(redisKey);
 
   if (!entry || now > entry.resetTime) {
@@ -194,11 +135,39 @@ export async function checkRateLimit(
   };
 }
 
-// ── Middleware wrapper ─────────────────────────────────────────────────────
+// ── Server Action helpers (no NextRequest needed) ──────────────────────────
+
+/**
+ * Check rate limit for a server action.
+ * 
+ * Usage:
+ *   const result = await checkActionRateLimit(`stk:${tenantId}`, RATE_LIMITS.stkPush);
+ *   if (!result.allowed) { return { error: `Wait ${result.retryAfter}s` }; }
+ */
+export async function checkActionRateLimit(
+  identifier: string,    // e.g., `stk:${tenantId}`, `ip:${ip}`, `rcpt:${agentId}`
+  config: RateLimitConfig
+): Promise<RateLimitResult> {
+  return checkRateLimit(identifier, config);
+}
+
+// ── Middleware helpers (for API routes) ────────────────────────────────────
+
+function getClientIp(req: NextRequest): string {
+  const forwarded = req.headers.get("x-forwarded-for");
+  return forwarded?.split(",")[0]?.trim()
+    ?? req.headers.get("x-real-ip")
+    ?? "unknown";
+}
+
+interface MiddlewareConfig extends RateLimitConfig {
+  keyExtractor: (req: NextRequest) => string;
+  customMessage?: string;
+}
 
 export async function rateLimitMiddleware(
   req: NextRequest,
-  config: RateLimitConfig
+  config: MiddlewareConfig
 ): Promise<NextResponse | null> {
   const clientKey = config.keyExtractor(req);
   const result = await checkRateLimit(clientKey, config);
@@ -228,7 +197,7 @@ export async function rateLimitMiddleware(
 
 export function createRateLimitedHandler(
   handler: (req: NextRequest) => Promise<NextResponse>,
-  config: RateLimitConfig
+  config: MiddlewareConfig
 ) {
   return async (req: NextRequest): Promise<NextResponse> => {
     const rateLimitResponse = await rateLimitMiddleware(req, config);
@@ -237,11 +206,41 @@ export function createRateLimitedHandler(
   };
 }
 
-// ── Server Action rate limiter (for STK Push, manual receipts) ───────────
+// ── Preset middleware configs for common routes ───────────────────────────
 
-export async function checkServerActionRateLimit(
-  identifier: string, // e.g., tenantId or clerkUserId
-  config: RateLimitConfig
-): Promise<RateLimitResult> {
-  return checkRateLimit(identifier, config);
-}
+export const MIDDLEWARE_CONFIGS = {
+  /** For /api/webhooks/mpesa/* — moderate, by IP */
+  mpesaWebhook: {
+    ...RATE_LIMITS.webhook,
+    keyExtractor: (req: NextRequest) => getClientIp(req),
+    customMessage: "Webhook rate limit exceeded.",
+  } as MiddlewareConfig,
+
+  /** For /api/webhooks/clerk — strict, by IP */
+  clerkWebhook: {
+    ...RATE_LIMITS.clerkWebhook,
+    keyExtractor: (req: NextRequest) => getClientIp(req),
+    customMessage: "Clerk webhook rate limit exceeded.",
+  } as MiddlewareConfig,
+
+  /** For /api/cron/* — very strict, by IP + CRON_SECRET check */
+  cron: {
+    ...RATE_LIMITS.cron,
+    keyExtractor: (req: NextRequest) => getClientIp(req),
+    customMessage: "Unauthorized cron access.",
+  } as MiddlewareConfig,
+
+  /** For general API routes — standard, by IP */
+  api: {
+    ...RATE_LIMITS.api,
+    keyExtractor: (req: NextRequest) => getClientIp(req),
+    customMessage: "API rate limit exceeded. Please slow down.",
+  } as MiddlewareConfig,
+
+  /** For auth-related API routes — strict, by IP */
+  auth: {
+    ...RATE_LIMITS.auth,
+    keyExtractor: (req: NextRequest) => getClientIp(req),
+    customMessage: "Too many authentication attempts. Try again in 1 minute.",
+  } as MiddlewareConfig,
+} as const;
