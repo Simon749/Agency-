@@ -1,5 +1,6 @@
 // app/(tenant)/pay/PayRentButton.tsx
 // PHASE 7 FIXES: Progressive payment states, polling, user-friendly errors, aria-live
+// DARK THEME — inline styles matching PropFlow design system
 
 "use client";
 
@@ -78,7 +79,7 @@ export function PayRentButton({ tenantId, buildingId, phone, amount, unitNumber 
           if (pollRef.current) clearInterval(pollRef.current);
         }
       } catch {
-        // Silently fail polling — don't disturb user
+        // Silently fail polling
       }
     }, 3000);
 
@@ -105,11 +106,13 @@ export function PayRentButton({ tenantId, buildingId, phone, amount, unitNumber 
     setMpesaCode(null);
 
     try {
-      const result = await initiatePayment({ tenantId, buildingId, phone, amount, unitNumber });
+      const result = await initiatePayment({
+        tenantId, buildingId, phone, amount, unitNumber,
+        agencyId: ""
+      });
       if (result.success) {
         setStatus("prompted");
         setMessage(result.message ?? "Check your phone for the M-Pesa prompt.");
-        // Start polling for completion
         setTimeout(() => {
           setStatus("processing");
           setMessage("Waiting for M-Pesa confirmation...");
@@ -138,7 +141,7 @@ export function PayRentButton({ tenantId, buildingId, phone, amount, unitNumber 
   }, []);
 
   return (
-    <div className="space-y-4">
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
       {/* Status announcement for screen readers */}
       <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
         {status === "initiating" && "Connecting to M-Pesa"}
@@ -149,16 +152,29 @@ export function PayRentButton({ tenantId, buildingId, phone, amount, unitNumber 
       </div>
 
       {/* Pay Button */}
-      {status === "idle" || status === "failed" ? (
+      {(status === "idle" || status === "failed") && (
         <button
           onClick={handlePay}
-          className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg transition select-none"
-          style={{ touchAction: "manipulation" }}
+          style={{
+            width: "100%",
+            padding: "14px 24px",
+            fontSize: "13px",
+            fontWeight: 500,
+            letterSpacing: "0.12em",
+            color: "#0b0b0b",
+            backgroundColor: "#4ade80",
+            border: "1px solid #4ade80",
+            cursor: "pointer",
+            textTransform: "uppercase",
+            fontFamily: '"Helvetica Neue", sans-serif',
+            minHeight: "52px",
+            touchAction: "manipulation",
+          }}
         >
           {status === "failed" ? (
-            <span className="flex items-center justify-center gap-2">
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
               Try Again
             </span>
@@ -166,68 +182,190 @@ export function PayRentButton({ tenantId, buildingId, phone, amount, unitNumber 
             `Pay KES ${amount.toLocaleString("en-KE")} via M-Pesa`
           )}
         </button>
-      ) : null}
+      )}
 
       {/* Initiating state */}
       {status === "initiating" && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center animate-pulse">
-          <p className="text-blue-800 font-medium">⏳ Connecting to M-Pesa...</p>
-          <p className="text-blue-700 text-sm mt-1">Please wait while we initiate your payment.</p>
-        </div>
+        <StatusBox
+          icon="⏳"
+          title="Connecting to M-Pesa..."
+          subtitle="Please wait while we initiate your payment."
+          borderColor="rgba(59,130,246,0.3)"
+          bgColor="rgba(59,130,246,0.06)"
+          titleColor="#60a5fa"
+          subtitleColor="rgba(255,255,255,0.5)"
+          pulse
+        />
       )}
 
       {/* Prompted state */}
       {status === "prompted" && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center animate-pulse">
-          <p className="text-blue-800 font-medium">📱 Check Your Phone</p>
-          <p className="text-blue-700 text-sm mt-1">{message}</p>
-          <p className="text-blue-600 text-xs mt-2">Enter your M-Pesa PIN to complete the payment.</p>
-        </div>
+        <StatusBox
+          icon="📱"
+          title="Check Your Phone"
+          subtitle={message}
+          hint="Enter your M-Pesa PIN to complete the payment."
+          borderColor="rgba(59,130,246,0.3)"
+          bgColor="rgba(59,130,246,0.06)"
+          titleColor="#60a5fa"
+          subtitleColor="rgba(255,255,255,0.6)"
+          hintColor="rgba(255,255,255,0.4)"
+          pulse
+        />
       )}
 
       {/* Processing state */}
       {status === "processing" && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
-          <p className="text-yellow-800 font-medium">⏳ Processing Payment...</p>
-          <p className="text-yellow-700 text-sm mt-1">Waiting for M-Pesa confirmation. This may take a moment.</p>
-          <div className="mt-3 flex justify-center">
-            <svg className="animate-spin h-5 w-5 text-yellow-600" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        <StatusBox
+          icon={
+            <svg width="20" height="20" viewBox="0 0 24 24" style={{ animation: "spin 1s linear infinite" }}>
+              <circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.2)" strokeWidth="4" fill="none" />
+              <path fill="#fbbf24" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
-          </div>
-        </div>
+          }
+          title="Processing Payment..."
+          subtitle="Waiting for M-Pesa confirmation. This may take a moment."
+          borderColor="rgba(251,191,36,0.3)"
+          bgColor="rgba(251,191,36,0.06)"
+          titleColor="#fbbf24"
+          subtitleColor="rgba(255,255,255,0.5)"
+        />
       )}
 
       {/* Completed state */}
       {status === "completed" && (
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
-          <p className="text-green-800 font-medium">✅ Payment Received!</p>
-          <p className="text-green-700 text-sm mt-1">{message}</p>
+        <div
+          style={{
+            backgroundColor: "rgba(34,197,94,0.06)",
+            border: "1px solid rgba(34,197,94,0.15)",
+            padding: "20px 24px",
+            textAlign: "center",
+          }}
+        >
+          <p style={{ fontSize: "14px", color: "#4ade80", fontWeight: 500, marginBottom: "4px" }}>
+            ✅ Payment Received!
+          </p>
+          <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.6)", marginBottom: "8px" }}>
+            {message}
+          </p>
           {mpesaCode && (
-            <p className="text-green-600 text-xs mt-2">M-Pesa Ref: {mpesaCode}</p>
+            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", marginBottom: "16px" }}>
+              M-Pesa Ref: {mpesaCode}
+            </p>
           )}
           <button
             onClick={reset}
-            className="mt-3 text-green-700 text-sm underline hover:text-green-900"
+            style={{
+              fontSize: "12px",
+              letterSpacing: "0.12em",
+              color: "#4ade80",
+              backgroundColor: "transparent",
+              border: "1px solid rgba(34,197,94,0.3)",
+              padding: "10px 20px",
+              cursor: "pointer",
+              textTransform: "uppercase",
+              fontFamily: "inherit",
+              minHeight: "40px",
+            }}
           >
-            Make another payment
+            Make Another Payment
           </button>
         </div>
       )}
 
       {/* Failed state */}
       {status === "failed" && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
-          <p className="text-red-800 font-medium">❌ Payment Failed</p>
-          <p className="text-red-700 text-sm mt-1">{message}</p>
+        <div
+          style={{
+            backgroundColor: "rgba(248,113,113,0.06)",
+            border: "1px solid rgba(248,113,113,0.15)",
+            padding: "20px 24px",
+            textAlign: "center",
+          }}
+        >
+          <p style={{ fontSize: "14px", color: "#f87171", fontWeight: 500, marginBottom: "4px" }}>
+            ❌ Payment Failed
+          </p>
+          <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.6)", marginBottom: "16px" }}>
+            {message}
+          </p>
           <button
             onClick={reset}
-            className="mt-3 px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition"
+            style={{
+              fontSize: "12px",
+              letterSpacing: "0.12em",
+              color: "#f87171",
+              backgroundColor: "transparent",
+              border: "1px solid rgba(248,113,113,0.3)",
+              padding: "10px 20px",
+              cursor: "pointer",
+              textTransform: "uppercase",
+              fontFamily: "inherit",
+              minHeight: "40px",
+            }}
           >
             Try Again
           </button>
         </div>
+      )}
+
+      {/* Add spin keyframe */}
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// ── Status Box Helper ────────────────────────────────────────────────────
+
+function StatusBox({
+  icon,
+  title,
+  subtitle,
+  hint,
+  borderColor,
+  bgColor,
+  titleColor,
+  subtitleColor,
+  hintColor = "rgba(255,255,255,0.4)",
+  pulse = false,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  subtitle: string;
+  hint?: string;
+  borderColor: string;
+  bgColor: string;
+  titleColor: string;
+  subtitleColor: string;
+  hintColor?: string;
+  pulse?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        backgroundColor: bgColor,
+        border: `1px solid ${borderColor}`,
+        padding: "20px 24px",
+        textAlign: "center",
+        animation: pulse ? "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite" : undefined,
+      }}
+    >
+      <p style={{ fontSize: "18px", marginBottom: "8px" }}>{icon}</p>
+      <p style={{ fontSize: "14px", color: titleColor, fontWeight: 500, marginBottom: "4px" }}>
+        {title}
+      </p>
+      <p style={{ fontSize: "13px", color: subtitleColor }}>
+        {subtitle}
+      </p>
+      {hint && (
+        <p style={{ fontSize: "12px", color: hintColor, marginTop: "8px" }}>
+          {hint}
+        </p>
       )}
     </div>
   );

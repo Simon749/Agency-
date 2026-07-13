@@ -1,4 +1,7 @@
 // app/(admin)/admin/buildings/[id]/units/page.tsx
+// Units List — FULLY RESPONSIVE with Pagination
+// Server Component with URL-based pagination
+
 import { revalidatePath } from 'next/cache';
 import { getDb } from '@/lib/db';
 import { buildings, units } from '@/db/schema';
@@ -6,18 +9,36 @@ import { eq, and, desc, count } from 'drizzle-orm';
 import { getSessionMeta } from '@/lib/auth/getRole';
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
+import { Pagination as PaginationComponent } from '@/components/ui/pagination';
+import { ComponentType, Suspense } from 'react';
 import type { Unit } from '@/db/schema';
 
-const PAGE_SIZE = 25;
+export const metadata = {
+  title: 'Units — PropFlow',
+};
 
-interface Props {
+type PaginationProps = {
+  totalPages: number;
+  currentPage: number;
+  pageSize: number;
+  totalItems: number;
+  showPageSizeSelector?: boolean;
+};
+
+const Pagination = PaginationComponent as unknown as ComponentType<PaginationProps>;
+
+const DEFAULT_PAGE_SIZE = 25;
+
+interface UnitsPageProps {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ page?: string }>;
+  searchParams?: Promise<{
+    page?: string;
+    pageSize?: string;
+  }>;
 }
 
-export default async function UnitsPage({ params, searchParams }: Props) {
+export default async function UnitsPage({ params, searchParams }: UnitsPageProps) {
   const { id: buildingId } = await params;
-  const { page: pageParam } = await searchParams;
   const session = await getSessionMeta();
   const { agencyId } = session;
 
@@ -25,12 +46,13 @@ export default async function UnitsPage({ params, searchParams }: Props) {
     redirect('/pending-setup');
   }
 
-  const page = Math.max(1, parseInt(pageParam ?? '1', 10));
-  const offset = (page - 1) * PAGE_SIZE;
+  const paramsResolved = await searchParams;
+  const currentPage = Math.max(1, parseInt(paramsResolved?.page ?? '1', 10));
+  const pageSize = Math.min(100, Math.max(1, parseInt(paramsResolved?.pageSize ?? '25', 10)));
+  const offset = (currentPage - 1) * pageSize;
 
   const db = getDb();
 
-  // Verify building belongs to agency — use AND for combined conditions
   const buildingRows = await db
     .select()
     .from(buildings)
@@ -42,7 +64,6 @@ export default async function UnitsPage({ params, searchParams }: Props) {
     notFound();
   }
 
-  // Fetch units for this building — count + paginated rows in parallel
   const [countResult, allUnits] = await Promise.all([
     db
       .select({ count: count() })
@@ -53,14 +74,12 @@ export default async function UnitsPage({ params, searchParams }: Props) {
       .from(units)
       .where(and(eq(units.buildingId, buildingId), eq(units.agencyId, agencyId)))
       .orderBy(units.unitNumber)
-      .limit(PAGE_SIZE)
+      .limit(pageSize)
       .offset(offset),
   ]);
 
   const totalCount = Number(countResult[0]?.count ?? 0);
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
-  const hasPrev = page > 1;
-  const hasNext = page < totalPages;
+  const totalPages = Math.ceil(totalCount / pageSize);
 
   return (
     <div>
@@ -74,34 +93,35 @@ export default async function UnitsPage({ params, searchParams }: Props) {
           marginBottom: '12px',
         }}
       >
-        <a href="/admin/buildings" style={{ color: 'rgba(255,255,255,0.45)', textDecoration: 'none' }}>
+        <Link href="/admin/buildings" style={{ color: 'rgba(255,255,255,0.45)', textDecoration: 'none' }}>
           Buildings
-        </a>{' '}
+        </Link>{' '}
         /{' '}
-        <a href={`/admin/buildings/${buildingId}`} style={{ color: 'rgba(255,255,255,0.45)', textDecoration: 'none' }}>
+        <Link href={`/admin/buildings/${buildingId}`} style={{ color: 'rgba(255,255,255,0.45)', textDecoration: 'none' }}>
           {building.name}
-        </a>{' '}
+        </Link>{' '}
         / Units
       </p>
 
       <h1
         style={{
-          fontSize: 'clamp(28px, 3.5vw, 44px)',
+          fontSize: 'clamp(24px, 4vw, 44px)',
           fontWeight: 400,
           letterSpacing: '-0.02em',
           marginBottom: '8px',
           color: '#ffffff',
+          lineHeight: 1.2,
         }}
       >
         {building.name} — Units
       </h1>
-      <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.5)', marginBottom: '48px' }}>
+      <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.5)', marginBottom: '40px' }}>
         {totalCount} {totalCount === 1 ? 'unit' : 'units'} · {building.location}
-        {totalPages > 1 && ` · Page ${page} of ${totalPages}`}
+        {totalPages > 1 && ` · Page ${currentPage} of ${totalPages}`}
       </p>
 
       {/* Add Unit Form */}
-      <section style={{ marginBottom: '72px' }}>
+      <section style={{ marginBottom: '56px' }}>
         <p
           style={{
             fontSize: '11px',
@@ -120,7 +140,7 @@ export default async function UnitsPage({ params, searchParams }: Props) {
           action={createUnit}
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
             gap: '20px',
             maxWidth: '960px',
           }}
@@ -141,7 +161,7 @@ export default async function UnitsPage({ params, searchParams }: Props) {
               type="submit"
               style={{
                 width: '100%',
-                padding: '13px 24px',
+                padding: '14px 24px',
                 fontSize: '12px',
                 fontWeight: 500,
                 letterSpacing: '0.16em',
@@ -151,6 +171,7 @@ export default async function UnitsPage({ params, searchParams }: Props) {
                 cursor: 'pointer',
                 textTransform: 'uppercase',
                 fontFamily: '"Helvetica Neue", sans-serif',
+                minHeight: '48px',
               }}
             >
               Add Unit
@@ -160,7 +181,7 @@ export default async function UnitsPage({ params, searchParams }: Props) {
       </section>
 
       {/* Bulk Add Section */}
-      <section style={{ marginBottom: '72px' }}>
+      <section style={{ marginBottom: '56px' }}>
         <p
           style={{
             fontSize: '11px',
@@ -206,7 +227,15 @@ export default async function UnitsPage({ params, searchParams }: Props) {
               }}
             />
           </label>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '20px', maxWidth: '600px', marginTop: '20px' }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '20px',
+              maxWidth: '600px',
+              marginTop: '20px',
+            }}
+          >
             <FormField name="bulkRent" label="Rent per unit (KES)" placeholder="25000" type="number" min="0" step="0.01" />
             <FormField name="bulkDeposit" label="Deposit per unit (KES)" placeholder="50000" type="number" min="0" step="0.01" />
           </div>
@@ -214,7 +243,7 @@ export default async function UnitsPage({ params, searchParams }: Props) {
             type="submit"
             style={{
               marginTop: '20px',
-              padding: '13px 28px',
+              padding: '14px 28px',
               fontSize: '12px',
               fontWeight: 500,
               letterSpacing: '0.16em',
@@ -224,6 +253,7 @@ export default async function UnitsPage({ params, searchParams }: Props) {
               cursor: 'pointer',
               textTransform: 'uppercase',
               fontFamily: '"Helvetica Neue", sans-serif',
+              minHeight: '48px',
             }}
           >
             Bulk Add
@@ -231,7 +261,7 @@ export default async function UnitsPage({ params, searchParams }: Props) {
         </form>
       </section>
 
-      {/* Units Table */}
+      {/* Units List */}
       <section>
         <p
           style={{
@@ -253,70 +283,117 @@ export default async function UnitsPage({ params, searchParams }: Props) {
           </p>
         ) : (
           <>
-            <div style={{ display: 'grid', gap: '2px' }}>
-              {/* Table header */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr 100px 80px',
-                  gap: '16px',
-                  padding: '10px 20px',
-                  fontSize: '11px',
-                  letterSpacing: '0.16em',
-                  color: 'rgba(255,255,255,0.35)',
-                  textTransform: 'uppercase',
-                }}
-              >
-                <span>Unit</span>
-                <span>Floor</span>
-                <span>Type</span>
-                <span>Rent (KES)</span>
-                <span>Deposit (KES)</span>
-                <span>Status</span>
-                <span>Action</span>
+            {/* DESKTOP TABLE — hidden on mobile */}
+            <div
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                overflow: 'hidden',
+                display: 'none',
+              }}
+              className="md:block"
+            >
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '700px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                      {['Unit', 'Floor', 'Type', 'Rent (KES)', 'Deposit (KES)', 'Status', 'Action'].map((h) => (
+                        <th
+                          key={h}
+                          style={{
+                            padding: '14px 16px',
+                            fontSize: '10px',
+                            letterSpacing: '0.18em',
+                            color: 'rgba(255,255,255,0.35)',
+                            textTransform: 'uppercase',
+                            fontWeight: 400,
+                            textAlign: h === 'Unit' ? 'left' : 'center',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allUnits.map((unit: Unit) => (
+                      <tr
+                        key={unit.id}
+                        style={{
+                          borderBottom: '1px solid rgba(255,255,255,0.06)',
+                        }}
+                      >
+                        <td style={{ padding: '14px 16px' }}>
+                          <p style={{ fontSize: '13px', color: '#ffffff', fontWeight: 500 }}>
+                            {unit.unitNumber}
+                          </p>
+                        </td>
+                        <td style={{ padding: '14px 16px', textAlign: 'center', fontSize: '13px', color: 'rgba(255,255,255,0.65)' }}>
+                          {unit.floor || '—'}
+                        </td>
+                        <td style={{ padding: '14px 16px', textAlign: 'center', fontSize: '13px', color: 'rgba(255,255,255,0.65)' }}>
+                          {unit.type || '—'}
+                        </td>
+                        <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: '13px', color: 'rgba(255,255,255,0.65)' }}>
+                          {Number(unit.rentAmount).toLocaleString('en-KE')}
+                        </td>
+                        <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: '13px', color: 'rgba(255,255,255,0.65)' }}>
+                          {Number(unit.depositAmount).toLocaleString('en-KE')}
+                        </td>
+                        <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                          <StatusBadge isOccupied={unit.isOccupied} />
+                        </td>
+                        <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                          <form action={deleteUnit}>
+                            <input type="hidden" name="unitId" value={unit.id} />
+                            <input type="hidden" name="buildingId" value={unit.buildingId} />
+                            <button
+                              type="submit"
+                              style={{
+                                fontSize: '11px',
+                                letterSpacing: '0.12em',
+                                color: 'rgba(255,255,255,0.5)',
+                                backgroundColor: 'transparent',
+                                border: '1px solid rgba(255,255,255,0.15)',
+                                padding: '8px 12px',
+                                cursor: 'pointer',
+                                textTransform: 'uppercase',
+                                fontFamily: 'inherit',
+                                minHeight: '36px',
+                                minWidth: '44px',
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </form>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
+            </div>
 
+            {/* MOBILE CARDS — shown only on mobile */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }} className="md:hidden">
               {allUnits.map((unit: Unit) => (
-                <UnitRow key={unit.id} unit={unit} />
+                <UnitCard key={unit.id} unit={unit} />
               ))}
             </div>
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '32px', alignItems: 'center' }}>
-                <Link
-                  href={hasPrev ? `/admin/buildings/${buildingId}/units?page=${page - 1}` : '#'}
-                  style={{
-                    padding: '8px 16px',
-                    fontSize: '12px',
-                    letterSpacing: '0.12em',
-                    color: hasPrev ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)',
-                    border: '1px solid rgba(255,255,255,0.2)',
-                    textDecoration: 'none',
-                    textTransform: 'uppercase',
-                    pointerEvents: hasPrev ? 'auto' : 'none',
-                  }}
-                >
-                  ← Prev
-                </Link>
-                <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', padding: '0 16px' }}>
-                  Page {page} of {totalPages}
-                </span>
-                <Link
-                  href={hasNext ? `/admin/buildings/${buildingId}/units?page=${page + 1}` : '#'}
-                  style={{
-                    padding: '8px 16px',
-                    fontSize: '12px',
-                    letterSpacing: '0.12em',
-                    color: hasNext ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)',
-                    border: '1px solid rgba(255,255,255,0.2)',
-                    textDecoration: 'none',
-                    textTransform: 'uppercase',
-                    pointerEvents: hasNext ? 'auto' : 'none',
-                  }}
-                >
-                  Next →
-                </Link>
+              <div style={{ marginTop: '32px' }}>
+                <Suspense fallback={<div style={{ height: '40px', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: '4px' }} />}>
+                  <Pagination
+                    totalPages={totalPages}
+                    currentPage={currentPage}
+                    pageSize={pageSize}
+                    totalItems={totalCount}
+                    showPageSizeSelector
+                  />
+                </Suspense>
               </div>
             )}
           </>
@@ -394,78 +471,6 @@ async function bulkCreateUnits(formData: FormData) {
   revalidatePath(`/admin/buildings/${buildingId}/units`);
 }
 
-// ── Unit Row ──────────────────────────────────────────────────────────────
-
-function UnitRow({ unit }: { unit: Unit }) {
-  const isOccupied = unit.isOccupied;
-
-  return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr 100px 80px',
-        gap: '16px',
-        padding: '16px 20px',
-        alignItems: 'center',
-        backgroundColor: 'rgba(255,255,255,0.03)',
-        border: '1px solid rgba(255,255,255,0.07)',
-        fontSize: '14px',
-        color: '#ffffff',
-      }}
-    >
-      <span style={{ fontWeight: 500 }}>{unit.unitNumber}</span>
-      <span style={{ color: 'rgba(255,255,255,0.65)' }}>{unit.floor || '—'}</span>
-      <span style={{ color: 'rgba(255,255,255,0.65)' }}>{unit.type || '—'}</span>
-      <span style={{ color: 'rgba(255,255,255,0.65)' }}>
-        {Number(unit.rentAmount).toLocaleString('en-KE')}
-      </span>
-      <span style={{ color: 'rgba(255,255,255,0.65)' }}>
-        {Number(unit.depositAmount).toLocaleString('en-KE')}
-      </span>
-      <span>
-        <span
-          style={{
-            display: 'inline-block',
-            fontSize: '10px',
-            fontWeight: 500,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            padding: '4px 10px',
-            backgroundColor: isOccupied ? 'rgba(239,68,68,0.12)' : 'rgba(34,197,94,0.12)',
-            color: isOccupied ? '#f87171' : '#4ade80',
-            border: `1px solid ${isOccupied ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {isOccupied ? 'Occupied' : 'Vacant'}
-        </span>
-      </span>
-      <span>
-        <form action={deleteUnit}>
-          <input type="hidden" name="unitId" value={unit.id} />
-          <input type="hidden" name="buildingId" value={unit.buildingId} />
-          <button
-            type="submit"
-            style={{
-              fontSize: '11px',
-              letterSpacing: '0.12em',
-              color: 'rgba(255,255,255,0.5)',
-              backgroundColor: 'transparent',
-              border: '1px solid rgba(255,255,255,0.15)',
-              padding: '6px 10px',
-              cursor: 'pointer',
-              textTransform: 'uppercase',
-              fontFamily: 'inherit',
-            }}
-          >
-            Delete
-          </button>
-        </form>
-      </span>
-    </div>
-  );
-}
-
 async function deleteUnit(formData: FormData) {
   'use server';
 
@@ -483,6 +488,150 @@ async function deleteUnit(formData: FormData) {
     .where(and(eq(units.id, unitId), eq(units.agencyId, agencyId), eq(units.buildingId, buildingId)));
 
   revalidatePath(`/admin/buildings/${buildingId}/units`);
+}
+
+// ── Mobile Unit Card ──────────────────────────────────────────────────────
+
+function UnitCard({ unit }: { unit: Unit }) {
+  const isOccupied = unit.isOccupied;
+
+  return (
+    <div
+      style={{
+        backgroundColor: 'rgba(255,255,255,0.04)',
+        border: '1px solid rgba(255,255,255,0.1)',
+        padding: '20px',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Status accent bar */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '3px',
+          backgroundColor: isOccupied ? '#ef4444' : '#22c55e',
+        }}
+      />
+
+      {/* Header: Unit number + Status */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          marginBottom: '16px',
+        }}
+      >
+        <div>
+          <p style={{ fontSize: '18px', color: '#ffffff', fontWeight: 500, marginBottom: '4px' }}>
+            {unit.unitNumber}
+          </p>
+          <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.35)' }}>
+            {unit.floor || 'No floor'} · {unit.type || 'No type'}
+          </p>
+        </div>
+        <StatusBadge isOccupied={isOccupied} />
+      </div>
+
+      {/* Financial details */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: '12px',
+          marginBottom: '16px',
+          padding: '12px',
+          backgroundColor: 'rgba(255,255,255,0.02)',
+        }}
+      >
+        <MobileStat
+          label="Monthly Rent"
+          value={`KES ${Number(unit.rentAmount).toLocaleString('en-KE')}`}
+        />
+        <MobileStat
+          label="Deposit"
+          value={`KES ${Number(unit.depositAmount).toLocaleString('en-KE')}`}
+        />
+      </div>
+
+      {/* Actions */}
+      <form action={deleteUnit} style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <input type="hidden" name="unitId" value={unit.id} />
+        <input type="hidden" name="buildingId" value={unit.buildingId} />
+        <button
+          type="submit"
+          style={{
+            fontSize: '11px',
+            letterSpacing: '0.12em',
+            color: 'rgba(255,255,255,0.5)',
+            backgroundColor: 'transparent',
+            border: '1px solid rgba(255,255,255,0.15)',
+            padding: '10px 16px',
+            cursor: 'pointer',
+            textTransform: 'uppercase',
+            fontFamily: 'inherit',
+            minHeight: '44px',
+            minWidth: '80px',
+          }}
+        >
+          Delete
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function StatusBadge({ isOccupied }: { isOccupied: boolean }) {
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        fontSize: '10px',
+        fontWeight: 500,
+        letterSpacing: '0.14em',
+        textTransform: 'uppercase',
+        padding: '4px 10px',
+        backgroundColor: isOccupied ? 'rgba(239,68,68,0.12)' : 'rgba(34,197,94,0.12)',
+        color: isOccupied ? '#f87171' : '#4ade80',
+        border: `1px solid ${isOccupied ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {isOccupied ? 'Occupied' : 'Vacant'}
+    </span>
+  );
+}
+
+function MobileStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p
+        style={{
+          fontSize: '10px',
+          letterSpacing: '0.14em',
+          color: 'rgba(255,255,255,0.35)',
+          textTransform: 'uppercase',
+          marginBottom: '4px',
+        }}
+      >
+        {label}
+      </p>
+      <p
+        style={{
+          fontSize: '14px',
+          color: '#ffffff',
+          fontWeight: 500,
+          wordBreak: 'break-word',
+        }}
+      >
+        {value}
+      </p>
+    </div>
+  );
 }
 
 // ── Form Helpers ────────────────────────────────────────────────────────

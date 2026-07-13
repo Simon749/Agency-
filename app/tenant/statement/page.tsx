@@ -37,16 +37,16 @@ export default async function TenantStatementPage() {
     );
   }
 
-  const balance = await getTenantBalance(tenant.id);
+  const balance = await getTenantBalance(tenant.id, tenant.agencyId);
   const entries = await getLedgerEntries(tenant.id);
 
-  // Calculate running balance
-  let runningBalance = 0;
-  const entriesWithBalance: EntryWithBalance[] = entries.map((entry: LedgerEntry) => {
-    if (entry.type === "DEBIT") runningBalance += entry.amount;
-    else runningBalance -= entry.amount;
-    return { ...entry, runningBalance };
-  });
+  // Calculate running balance without mutating state between renders
+  const entriesWithBalance: EntryWithBalance[] = entries.reduce<EntryWithBalance[]>((acc, entry: LedgerEntry) => {
+    const prevBalance = acc.length > 0 ? acc[acc.length - 1].runningBalance : 0;
+    const runningBalance = entry.type === "DEBIT" ? prevBalance + entry.amount : prevBalance - entry.amount;
+    acc.push({ ...entry, runningBalance });
+    return acc;
+  }, []);
 
   return (
     <div className="space-y-8">

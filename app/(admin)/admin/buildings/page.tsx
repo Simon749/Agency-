@@ -1,4 +1,7 @@
 // app/(admin)/admin/buildings/page.tsx
+// Buildings List — FULLY RESPONSIVE with Pagination
+// Server Component with URL-based pagination
+
 import { revalidatePath } from 'next/cache';
 import { getDb } from '@/lib/db';
 import { buildings } from '@/db/schema';
@@ -6,14 +9,35 @@ import { eq, desc, count } from 'drizzle-orm';
 import { getSessionMeta } from '@/lib/auth/getRole';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { Pagination as PaginationComponent } from '@/components/ui/pagination';
+import { Suspense, type ComponentType } from 'react';
 
-const PAGE_SIZE = 25;
+export const metadata = {
+  title: 'Buildings — PropFlow',
+};
+
+type PaginationProps = {
+  totalPages: number;
+  currentPage: number;
+  pageSize: number;
+  totalItems: number;
+  showPageSizeSelector?: boolean;
+};
+
+const Pagination = PaginationComponent as unknown as ComponentType<PaginationProps>;
+
+const DEFAULT_PAGE_SIZE = 10;
+
+interface BuildingsPageProps {
+  searchParams?: Promise<{
+    page?: string;
+    pageSize?: string;
+  }>;
+}
 
 export default async function BuildingsPage({
   searchParams,
-}: {
-  searchParams: Promise<{ page?: string }>;
-}) {
+}: BuildingsPageProps) {
   const session = await getSessionMeta();
   const { agencyId } = session;
 
@@ -22,8 +46,9 @@ export default async function BuildingsPage({
   }
 
   const params = await searchParams;
-  const page = Math.max(1, parseInt(params.page ?? '1', 10));
-  const offset = (page - 1) * PAGE_SIZE;
+  const currentPage = Math.max(1, parseInt(params?.page ?? '1', 10));
+  const pageSize = Math.min(100, Math.max(1, parseInt(params?.pageSize ?? '10', 10)));
+  const offset = (currentPage - 1) * pageSize;
 
   const db = getDb();
 
@@ -34,14 +59,12 @@ export default async function BuildingsPage({
       .from(buildings)
       .where(eq(buildings.agencyId, agencyId))
       .orderBy(desc(buildings.createdAt))
-      .limit(PAGE_SIZE)
+      .limit(pageSize)
       .offset(offset),
   ]);
 
   const totalCount = Number(countResult[0]?.count ?? 0);
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
-  const hasPrev = page > 1;
-  const hasNext = page < totalPages;
+  const totalPages = Math.ceil(totalCount / pageSize);
 
   return (
     <div>
@@ -58,18 +81,19 @@ export default async function BuildingsPage({
       </p>
       <h1
         style={{
-          fontSize: 'clamp(28px, 3.5vw, 44px)',
+          fontSize: 'clamp(24px, 4vw, 44px)',
           fontWeight: 400,
           letterSpacing: '-0.02em',
-          marginBottom: '56px',
+          marginBottom: '32px',
           color: '#ffffff',
+          lineHeight: 1.2,
         }}
       >
         Buildings
       </h1>
 
-      {/* Create Building Form */}
-      <section style={{ marginBottom: '72px' }}>
+      {/* Add Building Form */}
+      <section style={{ marginBottom: '56px' }}>
         <p
           style={{
             fontSize: '11px',
@@ -88,7 +112,7 @@ export default async function BuildingsPage({
           action={createBuilding}
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
             gap: '20px',
             maxWidth: '960px',
           }}
@@ -104,7 +128,7 @@ export default async function BuildingsPage({
               type="submit"
               style={{
                 width: '100%',
-                padding: '13px 24px',
+                padding: '14px 24px',
                 fontSize: '12px',
                 fontWeight: 500,
                 letterSpacing: '0.16em',
@@ -114,6 +138,7 @@ export default async function BuildingsPage({
                 cursor: 'pointer',
                 textTransform: 'uppercase',
                 fontFamily: '"Helvetica Neue", sans-serif',
+                minHeight: '48px',
               }}
             >
               Add Building
@@ -122,7 +147,7 @@ export default async function BuildingsPage({
         </form>
       </section>
 
-      {/* Buildings Table */}
+      {/* Buildings List */}
       <section>
         <p
           style={{
@@ -136,7 +161,7 @@ export default async function BuildingsPage({
           }}
         >
           {totalCount} {totalCount === 1 ? 'Building' : 'Buildings'}
-          {totalPages > 1 && ` · Page ${page} of ${totalPages}`}
+          {totalPages > 1 && ` · Page ${currentPage} of ${totalPages}`}
         </p>
 
         {allBuildings.length === 0 ? (
@@ -145,69 +170,119 @@ export default async function BuildingsPage({
           </p>
         ) : (
           <>
-            <div style={{ display: 'grid', gap: '2px' }}>
-              {/* Table header */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '2fr 1.5fr 1.5fr 1.5fr 100px 100px',
-                  gap: '16px',
-                  padding: '10px 20px',
-                  fontSize: '11px',
-                  letterSpacing: '0.16em',
-                  color: 'rgba(255,255,255,0.35)',
-                  textTransform: 'uppercase',
-                }}
-              >
-                <span>Name</span>
-                <span>Location</span>
-                <span>Locale</span>
-                <span>Landlord</span>
-                <span>Units</span>
-                <span>Action</span>
+            {/* DESKTOP TABLE — hidden on mobile */}
+            <div
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                overflow: 'hidden',
+                display: 'none',
+              }}
+              className="md:block"
+            >
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '600px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                      {['Name', 'Location', 'Locale', 'Landlord', 'Units', 'Action'].map((h) => (
+                        <th
+                          key={h}
+                          style={{
+                            padding: '14px 16px',
+                            fontSize: '10px',
+                            letterSpacing: '0.18em',
+                            color: 'rgba(255,255,255,0.35)',
+                            textTransform: 'uppercase',
+                            fontWeight: 400,
+                            textAlign: h === 'Name' ? 'left' : 'center',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allBuildings.map((building) => (
+                      <tr
+                        key={building.id}
+                        style={{
+                          borderBottom: '1px solid rgba(255,255,255,0.06)',
+                        }}
+                      >
+                        <td style={{ padding: '14px 16px' }}>
+                          <p style={{ fontSize: '13px', color: '#ffffff', fontWeight: 500, marginBottom: '2px' }}>
+                            {building.name}
+                          </p>
+                        </td>
+                        <td style={{ padding: '14px 16px', textAlign: 'center', fontSize: '13px', color: 'rgba(255,255,255,0.65)' }}>
+                          {building.location}
+                        </td>
+                        <td style={{ padding: '14px 16px', textAlign: 'center', fontSize: '13px', color: 'rgba(255,255,255,0.65)' }}>
+                          {building.locale || '—'}
+                        </td>
+                        <td style={{ padding: '14px 16px', textAlign: 'center', fontSize: '13px', color: 'rgba(255,255,255,0.65)' }}>
+                          {building.landlordName}
+                        </td>
+                        <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                          <Link
+                            href={`/admin/buildings/${building.id}/units`}
+                            style={{
+                              fontSize: '12px',
+                              color: 'rgba(255,255,255,0.65)',
+                              textDecoration: 'underline',
+                              textUnderlineOffset: '3px',
+                            }}
+                          >
+                            View
+                          </Link>
+                        </td>
+                        <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                          <Link
+                            href={`/admin/buildings/${building.id}`}
+                            style={{
+                              fontSize: '11px',
+                              letterSpacing: '0.12em',
+                              color: 'rgba(255,255,255,0.6)',
+                              textDecoration: 'none',
+                              textTransform: 'uppercase',
+                              border: '1px solid rgba(255,255,255,0.2)',
+                              padding: '8px 14px',
+                              display: 'inline-block',
+                              minHeight: '36px',
+                              minWidth: '44px',
+                            }}
+                          >
+                            Details
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
+            </div>
 
+            {/* MOBILE CARDS */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }} className="md:hidden">
               {allBuildings.map((building) => (
-                <BuildingRow key={building.id} building={building} />
+                <BuildingCard key={building.id} building={building} />
               ))}
             </div>
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '32px', alignItems: 'center' }}>
-                <Link
-                  href={hasPrev ? `/admin/buildings?page=${page - 1}` : '#'}
-                  style={{
-                    padding: '8px 16px',
-                    fontSize: '12px',
-                    letterSpacing: '0.12em',
-                    color: hasPrev ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)',
-                    border: '1px solid rgba(255,255,255,0.2)',
-                    textDecoration: 'none',
-                    textTransform: 'uppercase',
-                    pointerEvents: hasPrev ? 'auto' : 'none',
-                  }}
-                >
-                  ← Prev
-                </Link>
-                <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', padding: '0 16px' }}>
-                  Page {page} of {totalPages}
-                </span>
-                <Link
-                  href={hasNext ? `/admin/buildings?page=${page + 1}` : '#'}
-                  style={{
-                    padding: '8px 16px',
-                    fontSize: '12px',
-                    letterSpacing: '0.12em',
-                    color: hasNext ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)',
-                    border: '1px solid rgba(255,255,255,0.2)',
-                    textDecoration: 'none',
-                    textTransform: 'uppercase',
-                    pointerEvents: hasNext ? 'auto' : 'none',
-                  }}
-                >
-                  Next →
-                </Link>
+              <div style={{ marginTop: '32px' }}>
+                <Suspense fallback={<div style={{ height: '40px', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: '4px' }} />}>
+                  <Pagination
+                    totalPages={totalPages}
+                    currentPage={currentPage}
+                    pageSize={pageSize}
+                    totalItems={totalCount}
+                    showPageSizeSelector
+                  />
+                </Suspense>
               </div>
             )}
           </>
@@ -247,38 +322,68 @@ async function createBuilding(formData: FormData) {
   revalidatePath('/admin/buildings');
 }
 
-// ── Building Row ──────────────────────────────────────────────────────────
+// ── Mobile Building Card ────────────────────────────────────────────────────
 
-function BuildingRow({ building }: { building: typeof buildings.$inferSelect }) {
+function BuildingCard({
+  building,
+}: {
+  building: {
+    id: string;
+    name: string;
+    location: string;
+    locale: string | null;
+    landlordName: string;
+    landlordPhone: string | null;
+  };
+}) {
   return (
     <div
       style={{
-        display: 'grid',
-        gridTemplateColumns: '2fr 1.5fr 1.5fr 1.5fr 100px 100px',
-        gap: '16px',
-        padding: '16px 20px',
-        alignItems: 'center',
-        backgroundColor: 'rgba(255,255,255,0.03)',
-        border: '1px solid rgba(255,255,255,0.07)',
-        fontSize: '14px',
-        color: '#ffffff',
+        backgroundColor: 'rgba(255,255,255,0.04)',
+        border: '1px solid rgba(255,255,255,0.1)',
+        padding: '20px',
+        position: 'relative',
+        overflow: 'hidden',
       }}
     >
-      <span style={{ fontWeight: 500 }}>{building.name}</span>
-      <span style={{ color: 'rgba(255,255,255,0.65)' }}>{building.location}</span>
-      <span style={{ color: 'rgba(255,255,255,0.65)' }}>{building.locale || '—'}</span>
-      <span style={{ color: 'rgba(255,255,255,0.65)' }}>{building.landlordName}</span>
-      <span style={{ color: 'rgba(255,255,255,0.65)' }}>
-        <a
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '3px',
+          height: '100%',
+          backgroundColor: '#3b82f6',
+        }}
+      />
+
+      <div style={{ marginBottom: '16px', paddingLeft: '12px' }}>
+        <p style={{ fontSize: '15px', color: '#ffffff', fontWeight: 500, marginBottom: '4px' }}>
+          {building.name}
+        </p>
+        <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.35)' }}>
+          {building.location}{building.locale ? ` · ${building.locale}` : ''}
+        </p>
+      </div>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: '12px',
+          marginBottom: '16px',
+          padding: '12px',
+          backgroundColor: 'rgba(255,255,255,0.02)',
+          marginLeft: '12px',
+        }}
+      >
+        <MobileStat label="Landlord" value={building.landlordName} />
+        <MobileStat label="Phone" value={building.landlordPhone || '—'} />
+      </div>
+
+      <div style={{ display: 'flex', gap: '8px', paddingLeft: '12px' }}>
+        <Link
           href={`/admin/buildings/${building.id}/units`}
-          style={{ color: 'rgba(255,255,255,0.65)', textDecoration: 'underline', textUnderlineOffset: '3px' }}
-        >
-          View
-        </a>
-      </span>
-      <span>
-        <a
-          href={`/admin/buildings/${building.id}`}
           style={{
             fontSize: '11px',
             letterSpacing: '0.12em',
@@ -286,13 +391,64 @@ function BuildingRow({ building }: { building: typeof buildings.$inferSelect }) 
             textDecoration: 'none',
             textTransform: 'uppercase',
             border: '1px solid rgba(255,255,255,0.2)',
-            padding: '6px 12px',
-            display: 'inline-block',
+            padding: '10px 16px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: '44px',
+            flex: 1,
           }}
         >
-          Details
-        </a>
-      </span>
+          View Units
+        </Link>
+        <Link
+          href={`/admin/buildings/${building.id}`}
+          style={{
+            fontSize: '11px',
+            letterSpacing: '0.12em',
+            color: '#ffffff',
+            textDecoration: 'none',
+            textTransform: 'uppercase',
+            border: '1px solid rgba(255,255,255,0.35)',
+            padding: '10px 16px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: '44px',
+            flex: 1,
+          }}
+        >
+          Details →
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function MobileStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p
+        style={{
+          fontSize: '10px',
+          letterSpacing: '0.14em',
+          color: 'rgba(255,255,255,0.35)',
+          textTransform: 'uppercase',
+          marginBottom: '4px',
+        }}
+      >
+        {label}
+      </p>
+      <p
+        style={{
+          fontSize: '14px',
+          color: '#ffffff',
+          fontWeight: 500,
+          wordBreak: 'break-word',
+        }}
+      >
+        {value}
+      </p>
     </div>
   );
 }

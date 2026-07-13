@@ -10,6 +10,7 @@ const isAdminRoute = createRouteMatcher(['/admin(.*)']);
 const isAgentRoute = createRouteMatcher(['/admin/agent(.*)']);
 const isTenantRoute = createRouteMatcher(['/tenant(.*)']);
 const isProtectedRoute = createRouteMatcher(['/super-admin(.*)', '/admin(.*)', '/tenant(.*)']);
+const isTenantDetailRoute = createRouteMatcher(['/admin/tenants/([^/]+)']);
 // FIX: Added /pending-setup and /sign-up to public routes
 const isPublicRoute = createRouteMatcher(['/', '/sign-in(.*)', '/sign-up(.*)', '/pending-setup', '/suspended', '/deactivated']);
 
@@ -165,7 +166,7 @@ export default clerkMiddleware(async (auth, req) => {
       return NextResponse.redirect(new URL('/suspended', req.url));
     }
 
-    if (role === 'FIELD_AGENT' && !isAgentRoute(req)) {
+    if (role === 'FIELD_AGENT' && !isAgentRoute(req) && !isTenantDetailRoute(req)) {
       return NextResponse.redirect(new URL('/admin/agent/meter-readings', req.url));
     }
   }

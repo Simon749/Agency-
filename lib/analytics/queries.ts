@@ -14,6 +14,7 @@ import {
   agencies,
 } from "@/db/schema";
 import { unstable_cache } from "next/cache";
+import { ReactNode } from "react";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -54,8 +55,9 @@ export interface RecentPayment {
   date: Date;
 }
 
-export interface ArrearsTenant {
+export type ArrearsTenant = {
   tenantId: string;
+  tenantName: string;
   fullName: string;
   phone: string;
   buildingName: string;
@@ -65,7 +67,7 @@ export interface ArrearsTenant {
   daysOverdue: number;
   lastPaymentDate: Date | null;
   lastPaymentAmount: number | null;
-}
+};
 
 export interface DateRange {
   from: string;
@@ -315,6 +317,7 @@ export async function getArrearsReport(
 
     return {
       tenantId: r.tenantId,
+      tenantName: r.fullName,
       fullName: r.fullName,
       phone: r.phone,
       buildingName: r.buildingName,

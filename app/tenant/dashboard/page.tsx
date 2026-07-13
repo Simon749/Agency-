@@ -40,7 +40,7 @@ export default async function TenantDashboardPage() {
   const [[building], [unit], balance, recentEntries] = await Promise.all([
     db.select().from(buildings).where(eq(buildings.id, tenant.buildingId)).limit(1),
     db.select().from(units).where(eq(units.id, tenant.unitId)).limit(1),
-    getTenantBalance(tenant.id),
+    getTenantBalance(tenant.id, tenant.agencyId),
     getRecentLedgerEntries(tenant.id, 5),
   ]);
 
