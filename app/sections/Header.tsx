@@ -83,8 +83,8 @@ export default function Header({ scrollRef, forceLight = false }: HeaderProps) {
 
         {/* Desktop Nav — hidden on mobile */}
         <nav
-          style={{ display: 'none', alignItems: 'stretch', height: '100%' }}
-          className="md:flex"
+          style={{ alignItems: 'stretch', height: '100%' }}
+          className="hidden md:flex"
         >
           {navItems.map((item, i) => (
             <NavItem
@@ -113,7 +113,6 @@ export default function Header({ scrollRef, forceLight = false }: HeaderProps) {
         <button
           onClick={() => setMenuOpen(!menuOpen)}
           style={{
-            display: 'flex',
             flexDirection: 'column',
             justifyContent: 'center',
             gap: '5px',
@@ -124,7 +123,7 @@ export default function Header({ scrollRef, forceLight = false }: HeaderProps) {
             cursor: 'pointer',
             padding: 0,
           }}
-          className="md:hidden"
+          className="flex md:hidden"
           aria-label="Toggle menu"
         >
           <span
@@ -168,7 +167,7 @@ export default function Header({ scrollRef, forceLight = false }: HeaderProps) {
             top: isCompact ? '64px' : '88px',
             left: 0,
             width: '100%',
-            height: 'calc(100vh - 64px)',
+            height: isCompact ? 'calc(100vh - 64px)' : 'calc(100vh - 88px)',
             backgroundColor: '#ffffff',
             zIndex: 99,
             display: 'flex',
