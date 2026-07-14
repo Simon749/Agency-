@@ -305,8 +305,9 @@ export default async function ArrearsPage({
 
       {/* Back link */}
       <div style={{ marginTop: '32px' }}>
+        {/*
         <Link
-          href="/admin/dashboard"
+          href="/admin/agent/dashboard"
           style={{
             fontSize: '13px',
             letterSpacing: '0.14em',
@@ -317,6 +318,7 @@ export default async function ArrearsPage({
         >
           ← Back to Dashboard
         </Link>
+        */}
       </div>
     </div>
   );
