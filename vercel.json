@@ -27,10 +27,6 @@
     {
       "path": "/api/cron/backup-critical-data",
       "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/cron/agency-dashboard-cache",
-      "schedule": "*/5 * * * *"
     }
   ],
   "functions": {
