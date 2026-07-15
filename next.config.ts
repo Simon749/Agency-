@@ -22,7 +22,7 @@ const nextConfig: NextConfigWithEslint = {
   // ── Compression ───────────────────────────────────────────────────────────
   compress: true,
 
-  // ── Experimental Performance Features ────────────────────────────────────
+  // ── Experimental Performance & Dev Features ──────────────────────────────
   experimental: {
     // Optimize heavy package imports (tree-shaking hints)
     optimizePackageImports: [
@@ -30,6 +30,13 @@ const nextConfig: NextConfigWithEslint = {
       "recharts",
       "@clerk/nextjs",
     ],
+    // Fix CSRF validation mismatch in GitHub Codespaces and external domains
+    serverActions: {
+      allowedOrigins: [
+        "localhost:3000",
+        "*.app.github.dev", // Allows any GitHub Codespaces preview URL
+      ],
+    },
   },
 
   // ── Bundle Analysis (run with ANALYZE=true npm run build) ───────────────
