@@ -12,16 +12,25 @@ import { sql } from "drizzle-orm";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool);
 
-// ── Helper: insert and return ID ──────────────────────────────────────
+// ── Helper: insert and return row ────────────────────────────────────
+// ── Helper: insert and return row ────────────────────────────────────
 async function insertOne(table: string, cols: Record<string, unknown>) {
   const keys = Object.keys(cols);
   const values = Object.values(cols);
 
   const columnsSql = sql.raw(keys.map((k) => `"${k}"`).join(", "));
-  const valuesSql = sql.join(
-    values.map((v) => sql`${v}`),
-    sql`, `
-  );
+
+  const valueFragments = values.map((v) => {
+    if (Array.isArray(v)) {
+      // Build an explicit Postgres array literal so empty arrays
+      // don't collapse into invalid syntax like "()"
+      if (v.length === 0) return sql`'{}'`;
+      return sql`ARRAY[${sql.join(v.map((x) => sql`${x}`), sql`, `)}]`;
+    }
+    return sql`${v}`;
+  });
+
+  const valuesSql = sql.join(valueFragments, sql`, `);
 
   const query = sql`INSERT INTO ${sql.raw(`"${table}"`)} (${columnsSql}) VALUES (${valuesSql}) RETURNING *`;
 
@@ -32,6 +41,7 @@ async function insertOne(table: string, cols: Record<string, unknown>) {
 async function clearTable(table: string) {
   await db.execute(sql.raw(`DELETE FROM "${table}"`));
 }
+
 async function seed() {
   console.log("🧹 Clearing existing data...");
   await clearTable("complaint_updates");
@@ -80,7 +90,7 @@ async function seed() {
     phone: "+254722000002",
     role: "FIELD_AGENT",
     status: "ACTIVE",
-    assigned_building_ids: JSON.stringify([]),
+    assigned_building_ids: [],  // <-- FIXED: pass JS array, not JSON.stringify
   });
 
   // ── Buildings ───────────────────────────────────────────────────────
