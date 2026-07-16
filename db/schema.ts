@@ -454,3 +454,7 @@ export type InsertAgencySubscription = typeof agencySubscriptions.$inferInsert;
 
 export type SubscriptionPayment = typeof subscriptionPayments.$inferSelect;
 export type InsertSubscriptionPayment = typeof subscriptionPayments.$inferInsert;
+
+export function auditLog(auditLog: any) {
+    throw new Error("Function not implemented.");
+}

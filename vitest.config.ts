@@ -1,14 +1,23 @@
-import { defineConfig } from "vitest/config";
-import tsconfigPaths from "vite-tsconfig-paths";
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+import path from 'path';
 
 export default defineConfig({
-  plugins: [tsconfigPaths({ root: "./" })],
+  plugins: [react()],
   test: {
+    environment: 'node',
     globals: true,
-    environment: "node",
-    setupFiles: "./scripts/test-setup.ts",
-    pool: "forks", // Isolate tests to prevent DB state pollution
-    testTimeout: 30000, // 30s for DB operations
-    hookTimeout: 30000,
+    include: ['__tests__/**/*.test.ts'],
+    pool: 'forks',
+    maxWorkers: 1,
+  },
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, '.'),
+      '@db': path.resolve(__dirname, './db'),
+      '@/db': path.resolve(__dirname, './db'),
+      '@lib': path.resolve(__dirname, './lib'),
+      '@/lib': path.resolve(__dirname, './lib'),
+    },
   },
 });
