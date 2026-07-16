@@ -52,4 +52,3 @@ cd rem
 npm install
 npx drizzle-kit push
 npm run db:seed
-

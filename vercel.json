@@ -27,7 +27,8 @@
     {
       "path": "/api/cron/backup-critical-data",
       "schedule": "0 3 * * *"
-    }
+    },
+    { "path": "/api/cron/daily-audit-export", "schedule": "0 3 * * *" }
   ],
   "functions": {
     "app/api/health/route.ts": {

@@ -1,715 +1,466 @@
-/**
- * PropFlow Kenya — Complete Seed Script (Week 17)
- * ============================================================
- * Generates realistic end-to-end test data for QA walkthroughs.
- * 
- * Run: npx tsx scripts/seed.ts
- * Requires: DATABASE_URL in .env.local (unpooled Neon URL recommended)
- */
+// db/seed.ts
+// PropFlow Kenya — Seed Script (raw SQL, bypasses all type issues)
+// Run: npx tsx db/seed.ts
 
-import "dotenv/config";
-import { drizzle } from "drizzle-orm/node-postgres";
+import { config } from "dotenv";
+config({ path: ".env.local" });
+
 import { Pool } from "pg";
-import * as schema from "./schema/index.ts";
-import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { sql } from "drizzle-orm";
 
-// ── Types from schema ────────────────────────────────────────────
-type Agency = typeof schema.agencies.$inferSelect;
-type Building = typeof schema.buildings.$inferSelect;
-type Unit = typeof schema.units.$inferSelect;
-type Tenant = typeof schema.tenants.$inferSelect;
-type Staff = typeof schema.staff.$inferSelect;
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const db = drizzle(pool);
 
-// ── Kenyan Data Generators ───────────────────────────────────────
-const FIRST_NAMES = [
-  "James", "Mary", "John", "Patricia", "Robert", "Jennifer", "Michael", "Linda",
-  "William", "Elizabeth", "David", "Barbara", "Richard", "Susan", "Joseph", "Jessica",
-  "Thomas", "Sarah", "Charles", "Karen", "Daniel", "Nancy", "Matthew", "Lisa",
-  "Anthony", "Betty", "Mark", "Helen", "Donald", "Sandra", "Paul", "Donna",
-  "Steven", "Carol", "Kenneth", "Ruth", "Andrew", "Sharon", "George", "Michelle",
-  "Kevin", "Emily", "Brian", "Amanda", "Edward", "Melissa", "Ronald", "Deborah",
-  "Timothy", "Stephanie", "Jason", "Rebecca", "Jeffrey", "Laura", "Ryan", "Shirley",
-  "Jacob", "Cynthia", "Gary", "Kathleen", "Nicholas", "Amy", "Eric", "Angela",
-  "Jonathan", "Anna", "Stephen", "Brenda", "Larry", "Pamela", "Justin", "Emma",
-  "Scott", "Nicole", "Brandon", "Samantha", "Benjamin", "Katherine", "Samuel", "Christine",
-];
+// ── Helper: insert and return ID ──────────────────────────────────────
+async function insertOne(table: string, cols: Record<string, unknown>) {
+  const keys = Object.keys(cols);
+  const values = Object.values(cols);
 
-const LAST_NAMES = [
-  "Wanjiru", "Kamau", "Ochieng", "Muthoni", "Njoroge", "Achieng", "Kipchirchir", "Chebet",
-  "Omondi", "Wambui", "Kariuki", "Mutua", "Owuor", "Wangari", "Kiptoo", "Jepchirchir",
-  "Mwangi", "Koech", "Langat", "Rono", "Korir", "Tanui", "Kiprotich", "Jepkoech",
-  "Kipkoech", "Cherono", "Jepkorir", "Kipngetich", "Kemboi", "Kiplagat", "Kipchoge", "Kosgei",
-  "Kipruto", "Kiptanui", "Kipkurui", "Kiprono", "Kipchirchir", "Kiprotich", "Kipngetich", "Kipkemoi",
-  "Mutai", "Kigen", "Kipkemboi", "Kipkoech", "Kiplimo", "Kipchumba", "Kiprop", "Kiprono",
-  "Kipkurui", "Kiptoo", "Kipchirchir", "Kiprotich", "Kipngetich", "Kipkemboi", "Kipkoech", "Kiplimo",
-];
+  const columnsSql = sql.raw(keys.map((k) => `"${k}"`).join(", "));
+  const valuesSql = sql.join(
+    values.map((v) => sql`${v}`),
+    sql`, `
+  );
 
-const BUILDING_NAMES = [
-  ["Westview Apartments", "Westlands", "Westlands, Nairobi"],
-  ["Karen Heights", "Karen", "Karen, Nairobi"],
-];
+  const query = sql`INSERT INTO ${sql.raw(`"${table}"`)} (${columnsSql}) VALUES (${valuesSql}) RETURNING *`;
 
-const UNIT_TYPES = ["1BR", "2BR", "STUDIO", "BEDSITTER"] as const;
-const UNIT_NUMBERS = ["A1", "A2", "A3", "A4", "A5", "B1", "B2", "B3", "B4", "B5"];
-const FLOORS = ["Ground", "1", "2", "3", "4"];
-
-const RENT_RANGES: Record<string, [number, number]> = {
-  "1BR": [35000, 50000],
-  "2BR": [55000, 75000],
-  "STUDIO": [25000, 35000],
-  "BEDSITTER": [18000, 28000],
-};
-
-// ── Helpers ──────────────────────────────────────────────────────
-function randInt(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+  const result = await db.execute(query);
+  return result.rows[0];
 }
 
-function randItem<T>(arr: readonly T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
+async function clearTable(table: string) {
+  await db.execute(sql.raw(`DELETE FROM "${table}"`));
 }
-
-function randPhone(): string {
-  const prefixes = ["25471", "25472", "25473", "25474", "25479", "25470", "25478"] as const;
-  const prefix = randItem(prefixes);
-  const suffix = String(randInt(100000, 999999));
-  return prefix + suffix;
-}
-
-function randName(): string {
-  return `${randItem(FIRST_NAMES)} ${randItem(LAST_NAMES)}`;
-}
-
-function randEmail(name: string): string {
-  const clean = name.toLowerCase().replace(/\s+/g, ".");
-  const domains = ["gmail.com", "yahoo.com", "outlook.co.ke", "hotmail.com"] as const;
-  return `${clean}@${randItem(domains)}`;
-}
-
-function randNationalId(): string {
-  return String(randInt(10000000, 99999999));
-}
-
-function formatDate(d: Date): string {
-  return d.toISOString().split("T")[0];
-}
-
-function formatMonth(d: Date): string {
-  return d.toISOString().slice(0, 7);
-}
-
-function monthsAgo(n: number): Date {
-  const d = new Date();
-  d.setMonth(d.getMonth() - n);
-  return d;
-}
-
-function addMonths(d: Date, n: number): Date {
-  const nd = new Date(d);
-  nd.setMonth(nd.getMonth() + n);
-  return nd;
-}
-
-function generateMpesaCode(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let code = "";
-  for (let i = 0; i < 10; i++) code += chars[randInt(0, chars.length - 1)];
-  return code;
-}
-
-function generateCheckoutRequestId(): string {
-  return `ws_${Date.now()}_${randInt(1000, 9999)}`;
-}
-
-// ── Main Seed ────────────────────────────────────────────────────
 async function seed() {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    throw new Error("DATABASE_URL is not set in environment variables.");
-  }
+  console.log("🧹 Clearing existing data...");
+  await clearTable("complaint_updates");
+  await clearTable("complaints");
+  await clearTable("notifications");
+  await clearTable("pending_transactions");
+  await clearTable("utility_readings");
+  await clearTable("tenant_ledger");
+  await clearTable("leases");
+  await clearTable("tenants");
+  await clearTable("units");
+  await clearTable("building_utilities");
+  await clearTable("buildings");
+  await clearTable("staff");
+  await clearTable("agencies");
+  console.log("✅ Cleared.\n");
 
-  console.log("🔌 Connecting to database...");
-  const pool = new Pool({
-    connectionString: databaseUrl,
-    max: 5,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000,
+  // ── Agency ──────────────────────────────────────────────────────────
+  console.log("🏢 Creating agency...");
+  const agency = await insertOne("agencies", {
+    name: "PropFlow Demo Agency",
+    email: "admin@propflow.co.ke",
+    phone: "+254712345678",
+    invite_status: "ACCEPTED",
+    is_active: true,
+    subscription_status: "TRIAL",
   });
 
-  const db = drizzle(pool, { schema });
+  // ── Staff ───────────────────────────────────────────────────────────
+  console.log("👔 Creating staff...");
+  const manager = await insertOne("staff", {
+    clerk_user_id: "clerk_manager_001",
+    agency_id: agency.id,
+    full_name: "Grace Muthoni",
+    email: "grace@propflow.co.ke",
+    phone: "+254722000001",
+    role: "MANAGER",
+    status: "ACTIVE",
+  });
 
-  console.log("🧹 Cleaning existing seed data...");
-  await db.delete(schema.complaintUpdates);
-  await db.delete(schema.complaints);
-  await db.delete(schema.pendingTransactions);
-  await db.delete(schema.utilityReadings);
-  await db.delete(schema.tenantLedger);
-  await db.delete(schema.leases);
-  await db.delete(schema.tenants);
-  await db.delete(schema.units);
-  await db.delete(schema.buildingUtilities);
-  await db.delete(schema.buildings);
-  await db.delete(schema.staff);
-  await db.delete(schema.agencies);
+  const fieldAgent = await insertOne("staff", {
+    clerk_user_id: "clerk_agent_001",
+    agency_id: agency.id,
+    full_name: "Peter Kipchirchir",
+    email: "peter@propflow.co.ke",
+    phone: "+254722000002",
+    role: "FIELD_AGENT",
+    status: "ACTIVE",
+    assigned_building_ids: JSON.stringify([]),
+  });
 
-  console.log("🏢 Creating Agency...");
-  const [agency] = await db
-    .insert(schema.agencies)
-    .values({
-      name: "Nairobi Prime Properties",
-      email: "info@nairobiprime.co.ke",
-      phone: "+254712345678",
-      logoUrl: "https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=200",
-      isActive: true,
-      subscriptionStatus: "TRIAL",
-    })
-    .returning();
+  // ── Buildings ───────────────────────────────────────────────────────
+  console.log("🏗️ Creating buildings...");
+  const b1 = await insertOne("buildings", {
+    agency_id: agency.id,
+    name: "Westlands Heights",
+    location: "Westlands, Nairobi",
+    locale: "Westlands",
+    landlord_name: "James Mwangi",
+    landlord_phone: "+254723456789",
+    daraja_consumer_key: "test_ck_1",
+    daraja_consumer_secret: "test_cs_1",
+    daraja_shortcode: "174379",
+    daraja_passkey: "test_pk_1",
+  });
 
-  console.log(`   ✓ Agency: ${agency.name} (${agency.id})`);
+  const b2 = await insertOne("buildings", {
+    agency_id: agency.id,
+    name: "Karen Gardens",
+    location: "Karen, Nairobi",
+    locale: "Karen",
+    landlord_name: "Sarah Wambui",
+    landlord_phone: "+254723456790",
+    daraja_consumer_key: "test_ck_2",
+    daraja_consumer_secret: "test_cs_2",
+    daraja_shortcode: "174380",
+    daraja_passkey: "test_pk_2",
+  });
 
-  // ── Staff ──────────────────────────────────────────────────────
-  console.log("👔 Creating Staff...");
-  const staffData: typeof schema.staff.$inferInsert[] = [
-    {
-      clerkUserId: "clerk_manager_001",
-      agencyId: agency.id,
-      fullName: "Grace Muthoni",
-      email: "grace.muthoni@nairobiprime.co.ke",
-      phone: "+254722000001",
-      role: "MANAGER",
-      nationalId: "12345678",
+  // ── Building Utilities ──────────────────────────────────────────────
+  console.log("⚡ Creating utilities...");
+  const utilities = [
+    { building_id: b1.id, agency_id: agency.id, name: "WATER", is_enabled: true, rate_type: "PER_UNIT", default_amount: "100.00", unit: "m³" },
+    { building_id: b1.id, agency_id: agency.id, name: "ELECTRICITY", is_enabled: true, rate_type: "PER_UNIT", default_amount: "25.00", unit: "kWh" },
+    { building_id: b1.id, agency_id: agency.id, name: "GARBAGE", is_enabled: true, rate_type: "FIXED", default_amount: "500.00" },
+    { building_id: b1.id, agency_id: agency.id, name: "WIFI", is_enabled: true, rate_type: "FIXED", default_amount: "1000.00" },
+    { building_id: b1.id, agency_id: agency.id, name: "SECURITY", is_enabled: true, rate_type: "FIXED", default_amount: "800.00" },
+    { building_id: b2.id, agency_id: agency.id, name: "WATER", is_enabled: true, rate_type: "PER_UNIT", default_amount: "120.00", unit: "m³" },
+    { building_id: b2.id, agency_id: agency.id, name: "ELECTRICITY", is_enabled: true, rate_type: "PER_UNIT", default_amount: "28.00", unit: "kWh" },
+    { building_id: b2.id, agency_id: agency.id, name: "GARBAGE", is_enabled: true, rate_type: "FIXED", default_amount: "600.00" },
+  ];
+  for (const u of utilities) {
+    await insertOne("building_utilities", u);
+  }
+
+  // ── Units ───────────────────────────────────────────────────────────
+  console.log("🏠 Creating units...");
+  const unitData = [
+    { building_id: b1.id, agency_id: agency.id, unit_number: "A1", floor: "1", type: "1BR", rent_amount: "25000.00", deposit_amount: "50000.00", is_occupied: true },
+    { building_id: b1.id, agency_id: agency.id, unit_number: "A2", floor: "1", type: "2BR", rent_amount: "35000.00", deposit_amount: "70000.00", is_occupied: true },
+    { building_id: b1.id, agency_id: agency.id, unit_number: "B1", floor: "G", type: "STUDIO", rent_amount: "18000.00", deposit_amount: "36000.00", is_occupied: false },
+    { building_id: b2.id, agency_id: agency.id, unit_number: "A1", floor: "1", type: "2BR", rent_amount: "40000.00", deposit_amount: "80000.00", is_occupied: true },
+    { building_id: b2.id, agency_id: agency.id, unit_number: "A2", floor: "2", type: "1BR", rent_amount: "28000.00", deposit_amount: "56000.00", is_occupied: true },
+    { building_id: b2.id, agency_id: agency.id, unit_number: "B1", floor: "G", type: "BEDSITTER", rent_amount: "15000.00", deposit_amount: "30000.00", is_occupied: false },
+  ];
+  const seededUnits: any[] = [];
+  for (const u of unitData) {
+    seededUnits.push(await insertOne("units", u));
+  }
+  const [u1_b1, u2_b1, u3_b1, u1_b2, u2_b2, u3_b2] = seededUnits;
+
+  // ── Tenants ─────────────────────────────────────────────────────────
+  console.log("👥 Creating tenants...");
+  const john = await insertOne("tenants", {
+    clerk_user_id: "user_john_kamau_001",
+    agency_id: agency.id,
+    building_id: b1.id,
+    unit_id: u1_b1.id,
+    full_name: "John Kamau",
+    phone: "+254712345001",
+    email: "john@email.com",
+    national_id: "12345678",
+    agency_name: agency.name,
+    invite_status: "ACCEPTED",
+    status: "ACTIVE",
+  });
+
+  const grace = await insertOne("tenants", {
+    clerk_user_id: "user_grace_wanjiku_002",
+    agency_id: agency.id,
+    building_id: b1.id,
+    unit_id: u2_b1.id,
+    full_name: "Grace Wanjiku",
+    phone: "+254712345002",
+    email: "grace@email.com",
+    national_id: "23456789",
+    agency_name: agency.name,
+    invite_status: "ACCEPTED",
+    status: "ACTIVE",
+  });
+
+  const peter = await insertOne("tenants", {
+    clerk_user_id: "user_peter_ochieng_003",
+    agency_id: agency.id,
+    building_id: b2.id,
+    unit_id: u1_b2.id,
+    full_name: "Peter Ochieng",
+    phone: "+254712345003",
+    email: "peter@email.com",
+    national_id: "34567890",
+    agency_name: agency.name,
+    invite_status: "ACCEPTED",
+    status: "ACTIVE",
+  });
+
+  // ── Leases ──────────────────────────────────────────────────────────
+  console.log("📄 Creating leases...");
+  for (const { tenant, unit } of [
+    { tenant: john, unit: u1_b1 },
+    { tenant: grace, unit: u2_b1 },
+    { tenant: peter, unit: u1_b2 },
+  ]) {
+    await insertOne("leases", {
+      tenant_id: tenant.id,
+      unit_id: unit.id,
+      agency_id: agency.id,
+      start_date: "2026-01-01",
+      end_date: "2026-12-31",
+      rent_amount: unit.rent_amount,
+      deposit_amount: unit.deposit_amount,
+      deposit_paid: true,
+      escalation_type: "FIXED",
       status: "ACTIVE",
-      assignedBuildingIds: [],
-    },
-    {
-      clerkUserId: "clerk_agent_001",
-      agencyId: agency.id,
-      fullName: "Peter Kipchirchir",
-      email: "peter.kipchirchir@nairobiprime.co.ke",
-      phone: "+254722000002",
-      role: "FIELD_AGENT",
-      nationalId: "87654321",
-      status: "ACTIVE",
-      assignedBuildingIds: [],
-    },
-  ];
-
-  const [manager, fieldAgent] = await db
-    .insert(schema.staff)
-    .values(staffData)
-    .returning();
-
-  console.log(`   ✓ Manager: ${manager.fullName}`);
-  console.log(`   ✓ Field Agent: ${fieldAgent.fullName}`);
-
-  // ── Buildings ────────────────────────────────────────────────────
-  console.log("🏗️ Creating Buildings...");
-  const buildings: Building[] = [];
-
-  for (let b = 0; b < BUILDING_NAMES.length; b++) {
-    const [name, locale, location] = BUILDING_NAMES[b];
-    const [building] = await db
-      .insert(schema.buildings)
-      .values({
-        agencyId: agency.id,
-        name,
-        location,
-        locale,
-        landlordName: b === 0 ? "John Kamau" : "Sarah Wambui",
-        landlordPhone: b === 0 ? "+254723456789" : "+254723456790",
-        darajaConsumerKey: `consumer_key_${b + 1}`,
-        darajaConsumerSecret: `consumer_secret_${b + 1}`,
-        darajaShortcode: b === 0 ? "174379" : "174380",
-        darajaPasskey: `passkey_${b + 1}`,
-      })
-      .returning();
-
-    buildings.push(building);
-    console.log(`   ✓ Building: ${building.name} (${building.id})`);
-  }
-
-  // ── Building Utilities ─────────────────────────────────────────
-  console.log("⚡ Configuring Building Utilities...");
-  const utilityConfigs: { buildingId: string; name: string; rateType: string; defaultAmount: string; unit?: string }[][] = [
-    [
-      { buildingId: buildings[0].id, name: "RENT", rateType: "FIXED", defaultAmount: "0.00" },
-      { buildingId: buildings[0].id, name: "WATER", rateType: "PER_UNIT", defaultAmount: "50.00", unit: "m³" },
-      { buildingId: buildings[0].id, name: "ELECTRICITY", rateType: "PER_UNIT", defaultAmount: "25.00", unit: "kWh" },
-      { buildingId: buildings[0].id, name: "GARBAGE", rateType: "FIXED", defaultAmount: "500.00" },
-      { buildingId: buildings[0].id, name: "SERVICE_CHARGE", rateType: "FIXED", defaultAmount: "1500.00" },
-      { buildingId: buildings[0].id, name: "WIFI", rateType: "FIXED", defaultAmount: "1000.00" },
-      { buildingId: buildings[0].id, name: "SECURITY", rateType: "FIXED", defaultAmount: "800.00" },
-    ],
-    [
-      { buildingId: buildings[1].id, name: "RENT", rateType: "FIXED", defaultAmount: "0.00" },
-      { buildingId: buildings[1].id, name: "WATER", rateType: "PER_UNIT", defaultAmount: "45.00", unit: "m³" },
-      { buildingId: buildings[1].id, name: "ELECTRICITY", rateType: "PER_UNIT", defaultAmount: "22.00", unit: "kWh" },
-      { buildingId: buildings[1].id, name: "GARBAGE", rateType: "FIXED", defaultAmount: "400.00" },
-      { buildingId: buildings[1].id, name: "SECURITY", rateType: "FIXED", defaultAmount: "600.00" },
-    ],
-  ];
-
-  for (const configs of utilityConfigs) {
-    for (const cfg of configs) {
-      await db.insert(schema.buildingUtilities).values({
-        agencyId: agency.id,
-        ...cfg,
-      } as typeof schema.buildingUtilities.$inferInsert);
-    }
-  }
-  console.log(`   ✓ ${utilityConfigs.flat().length} utility configurations created`);
-
-  // ── Units ──────────────────────────────────────────────────────
-  console.log("🏠 Creating Units (10 per building)...");
-  const allUnits: Unit[] = [];
-
-  for (let b = 0; b < buildings.length; b++) {
-    for (let u = 0; u < 10; u++) {
-      const unitType = randItem([...UNIT_TYPES]);
-      const [minRent, maxRent] = RENT_RANGES[unitType];
-      const rentAmount = randInt(minRent, maxRent);
-      const depositAmount = rentAmount;
-
-      const [unit] = await db
-        .insert(schema.units)
-        .values({
-          buildingId: buildings[b].id,
-          agencyId: agency.id,
-          unitNumber: UNIT_NUMBERS[u],
-          floor: randItem(FLOORS),
-          type: unitType,
-          rentAmount: String(rentAmount),
-          depositAmount: String(depositAmount),
-          isOccupied: false,
-        })
-        .returning();
-
-      allUnits.push(unit);
-    }
-  }
-  console.log(`   ✓ ${allUnits.length} units created`);
-
-  // ── Tenants + Leases ───────────────────────────────────────────
-  console.log("👥 Creating 15 Tenants with Leases...");
-  const tenants: Tenant[] = [];
-  const leases: (typeof schema.leases.$inferSelect)[] = [];
-
-  const shuffledUnits = [...allUnits].sort(() => Math.random() - 0.5);
-  const occupiedUnits = shuffledUnits.slice(0, 15);
-  const leaseStartBase = monthsAgo(4);
-
-  for (let i = 0; i < 15; i++) {
-    const unit = occupiedUnits[i];
-    const building = buildings.find((b) => b.id === unit.buildingId)!;
-    const fullName = randName();
-    const phone = randPhone();
-    const email = randEmail(fullName);
-    const nationalId = randNationalId();
-
-    const inviteStatus = Math.random() > 0.2 ? "ACCEPTED" : "PENDING";
-    const clerkUserId = inviteStatus === "ACCEPTED" ? `clerk_tenant_${i + 1}` : null;
-
-    const [tenant] = await db
-      .insert(schema.tenants)
-      .values({
-        clerkUserId: clerkUserId || undefined,
-        agencyId: agency.id,
-        buildingId: building.id,
-        unitId: unit.id,
-        fullName,
-        phone,
-        email,
-        nationalId,
-        inviteStatus,
-        status: "ACTIVE",
-      })
-      .returning();
-
-    tenants.push(tenant);
-
-    await db
-      .update(schema.units)
-      .set({ isOccupied: true })
-      .where(eq(schema.units.id, unit.id));
-
-    const startDate = new Date(leaseStartBase);
-    startDate.setDate(startDate.getDate() + randInt(1, 28));
-    const endDate = addMonths(startDate, 12);
-
-    const [lease] = await db
-      .insert(schema.leases)
-      .values({
-        tenantId: tenant.id,
-        unitId: unit.id,
-        agencyId: agency.id,
-        startDate: formatDate(startDate),
-        endDate: formatDate(endDate),
-        rentAmount: unit.rentAmount,
-        depositAmount: unit.depositAmount,
-        depositPaid: Math.random() > 0.1,
-        escalationType: Math.random() > 0.5 ? "FIXED" : "PERCENTAGE",
-        escalationValue: Math.random() > 0.5 ? "2000.00" : "5.00",
-        agreementTemplate: `# TENANCY AGREEMENT\n\nThis agreement is made between **Nairobi Prime Properties** (the Agent) acting on behalf of **{{LANDLORD_NAME}}** (the Landlord) and **{{TENANT_NAME}}** (the Tenant).\n\n**Property:** {{BUILDING_NAME}}, Unit {{UNIT_NUMBER}}, {{BUILDING_LOCATION}}\n\n**Lease Term:** {{LEASE_START}} to {{LEASE_END}}\n\n**Monthly Rent:** KES {{RENT_AMOUNT}}\n\n**Deposit:** KES {{DEPOSIT_AMOUNT}}\n\nSigned: _________________`,
-        agreementGenerated: null,
-        signedAt: inviteStatus === "ACCEPTED" ? new Date(startDate.getTime() + 86400000 * 3) : null,
-        signedByTenantId: inviteStatus === "ACCEPTED" ? clerkUserId : null,
-        status: "ACTIVE",
-      })
-      .returning();
-
-    leases.push(lease);
-  }
-
-  console.log(`   ✓ ${tenants.length} tenants created`);
-  console.log(`   ✓ ${leases.length} leases created`);
-
-  // ── 3 Months of Ledger History ─────────────────────────────────
-  console.log("📚 Generating 3 months of ledger history...");
-
-  const billingMonths = [
-    formatMonth(monthsAgo(2)),
-    formatMonth(monthsAgo(1)),
-    formatMonth(new Date()),
-  ];
-
-  let ledgerCount = 0;
-
-  // Payment methods that match schema.ts paymentMethodEnum exactly
-  const PAYMENT_METHODS: Array<"MPESA_STK" | "BANK_RECEIPT" | "CASH" | "SYSTEM"> = [
-    "MPESA_STK", "BANK_RECEIPT", "CASH", "SYSTEM"
-  ];
-
-  for (const tenant of tenants) {
-    const unit = allUnits.find((u) => u.id === tenant.unitId)!;
-    const building = buildings.find((b) => b.id === tenant.buildingId)!;
-    const lease = leases.find((l) => l.tenantId === tenant.id)!;
-    const rentAmount = parseFloat(String(unit.rentAmount));
-
-    for (let m = 0; m < billingMonths.length; m++) {
-      const month = billingMonths[m];
-      const isCurrentMonth = m === 2;
-
-      // 1. RENT DEBIT
-      await db.insert(schema.tenantLedger).values({
-        tenantId: tenant.id,
-        buildingId: building.id,
-        agencyId: agency.id,
-        type: "DEBIT",
-        category: "RENT",
-        amount: String(rentAmount),
-        billingMonth: month,
-        description: `${month} Rent — ${unit.unitNumber}`,
-        referenceCode: null,
-        method: "SYSTEM",
-        recordedBy: null,
-      });
-      ledgerCount++;
-
-      // 2. FIXED UTILITIES
-      const buildingUtils = utilityConfigs
-        .flat()
-        .filter((u) => u.buildingId === building.id && u.name !== "RENT" && u.rateType === "FIXED");
-
-      for (const util of buildingUtils) {
-        await db.insert(schema.tenantLedger).values({
-          tenantId: tenant.id,
-          buildingId: building.id,
-          agencyId: agency.id,
-          type: "DEBIT",
-          category: util.name as "WATER" | "ELECTRICITY" | "GARBAGE" | "SERVICE_CHARGE" | "WIFI" | "SECURITY" | "PREVIOUS_BALANCE" | "DEPOSIT" | "RENT",
-          amount: util.defaultAmount,
-          billingMonth: month,
-          description: `${month} ${util.name} — ${unit.unitNumber}`,
-          referenceCode: null,
-          method: "SYSTEM",
-          recordedBy: null,
-        });
-        ledgerCount++;
-      }
-
-      // 3. VARIABLE UTILITIES
-      if (Math.random() > 0.3) {
-        const waterRate = 50;
-        const prevWater = randInt(100, 500);
-        const currWater = prevWater + randInt(5, 25);
-        const waterUnits = currWater - prevWater;
-        const waterCharge = waterUnits * waterRate;
-
-        await db.insert(schema.tenantLedger).values({
-          tenantId: tenant.id,
-          buildingId: building.id,
-          agencyId: agency.id,
-          type: "DEBIT",
-          category: "WATER",
-          amount: String(waterCharge),
-          billingMonth: month,
-          description: `${month} Water — ${waterUnits}m³ @ KES ${waterRate}/m³`,
-          referenceCode: null,
-          method: "SYSTEM",
-          recordedBy: fieldAgent.clerkUserId,
-        });
-        ledgerCount++;
-
-        await db.insert(schema.utilityReadings).values({
-          unitId: unit.id,
-          buildingId: building.id,
-          agencyId: agency.id,
-          recordedBy: fieldAgent.clerkUserId,
-          utilityType: "WATER",
-          previousReading: String(prevWater),
-          currentReading: String(currWater),
-          unitsConsumed: String(waterUnits),
-          ratePerUnit: String(waterRate),
-          amountCharged: String(waterCharge),
-          billingMonth: month,
-        });
-      }
-
-      if (Math.random() > 0.3) {
-        const elecRate = 25;
-        const prevElec = randInt(200, 1000);
-        const currElec = prevElec + randInt(50, 200);
-        const elecUnits = currElec - prevElec;
-        const elecCharge = elecUnits * elecRate;
-
-        await db.insert(schema.tenantLedger).values({
-          tenantId: tenant.id,
-          buildingId: building.id,
-          agencyId: agency.id,
-          type: "DEBIT",
-          category: "ELECTRICITY",
-          amount: String(elecCharge),
-          billingMonth: month,
-          description: `${month} Electricity — ${elecUnits}kWh @ KES ${elecRate}/kWh`,
-          referenceCode: null,
-          method: "SYSTEM",
-          recordedBy: fieldAgent.clerkUserId,
-        });
-        ledgerCount++;
-
-        await db.insert(schema.utilityReadings).values({
-          unitId: unit.id,
-          buildingId: building.id,
-          agencyId: agency.id,
-          recordedBy: fieldAgent.clerkUserId,
-          utilityType: "ELECTRICITY",
-          previousReading: String(prevElec),
-          currentReading: String(currElec),
-          unitsConsumed: String(elecUnits),
-          ratePerUnit: String(elecRate),
-          amountCharged: String(elecCharge),
-          billingMonth: month,
-        });
-      }
-
-      // 4. PREVIOUS BALANCE
-      if (m > 0 && Math.random() > 0.6) {
-        const arrears = randInt(2000, 15000);
-        await db.insert(schema.tenantLedger).values({
-          tenantId: tenant.id,
-          buildingId: building.id,
-          agencyId: agency.id,
-          type: "DEBIT",
-          category: "PREVIOUS_BALANCE",
-          amount: String(arrears),
-          billingMonth: month,
-          description: `${month} Previous month balance carried forward`,
-          referenceCode: null,
-          method: "SYSTEM",
-          recordedBy: null,
-        });
-        ledgerCount++;
-      }
-
-      // 5. PAYMENTS (CREDIT)
-      const totalDue = rentAmount + buildingUtils.reduce((s, u) => s + parseFloat(u.defaultAmount), 0);
-      const paymentRoll = Math.random();
-      let paymentAmount = 0;
-
-      if (!isCurrentMonth) {
-        paymentAmount = paymentRoll > 0.15 ? totalDue : Math.floor(totalDue * 0.6);
-      } else {
-        if (paymentRoll > 0.4) paymentAmount = totalDue;
-        else if (paymentRoll > 0.1) paymentAmount = Math.floor(totalDue * 0.5);
-      }
-
-      if (paymentAmount > 0) {
-        // Pick a random payment method from the typed array
-        const method = randItem(PAYMENT_METHODS);
-        const refCode = method === "MPESA_STK" ? generateMpesaCode() : `REF-${randInt(10000, 99999)}`;
-
-        await db.insert(schema.tenantLedger).values({
-          tenantId: tenant.id,
-          buildingId: building.id,
-          agencyId: agency.id,
-          type: "CREDIT",
-          category: "RENT",
-          amount: String(paymentAmount),
-          billingMonth: month,
-          description: `${month} Payment — ${method}`,
-          referenceCode: refCode,
-          method: method,
-          recordedBy: method === "CASH" || method === "BANK_RECEIPT" ? fieldAgent.clerkUserId : null,
-        });
-        ledgerCount++;
-
-        // If M-Pesa, create pending transaction record
-        if (method === "MPESA_STK") {
-          await db.insert(schema.pendingTransactions).values({
-            tenantId: tenant.id,
-            buildingId: building.id,
-            agencyId: agency.id,
-            checkoutRequestId: generateCheckoutRequestId(),
-            merchantRequestId: generateCheckoutRequestId(),
-            amount: String(paymentAmount),
-            phoneNumber: tenant.phone,
-            billingMonth: month,
-            status: "COMPLETED",
-            mpesaReceiptNumber: refCode,
-            resultCode: "0",
-            resultDesc: "The service request has been processed successfully",
-            completedAt: new Date(),
-          });
-        }
-      }
-    }
-  }
-
-  console.log(`   ✓ ${ledgerCount} ledger entries created`);
-
-  // ── Pending Transactions ───────────────────────────────────────
-  console.log("💳 Creating pending M-Pesa transactions...");
-
-  const currentMonth = formatMonth(new Date());
-  const pendingTenants = tenants.slice(0, 3);
-  for (const tenant of pendingTenants) {
-    const unit = allUnits.find((u) => u.id === tenant.unitId)!;
-    const building = buildings.find((b) => b.id === tenant.buildingId)!;
-    const rentAmount = parseFloat(String(unit.rentAmount));
-
-    await db.insert(schema.pendingTransactions).values({
-      tenantId: tenant.id,
-      buildingId: building.id,
-      agencyId: agency.id,
-      checkoutRequestId: generateCheckoutRequestId(),
-      merchantRequestId: generateCheckoutRequestId(),
-      amount: String(rentAmount),
-      phoneNumber: tenant.phone,
-      billingMonth: currentMonth,
-      status: "PENDING",
-      mpesaReceiptNumber: null,
-      resultCode: null,
-      resultDesc: null,
-      completedAt: null,
     });
   }
 
-  const failedTenant = tenants[3];
-  const failedUnit = allUnits.find((u) => u.id === failedTenant.unitId)!;
-  const failedBuilding = buildings.find((b) => b.id === failedTenant.buildingId)!;
+  // ── Ledger ──────────────────────────────────────────────────────────
+  console.log("💰 Creating ledger entries...");
 
-  await db.insert(schema.pendingTransactions).values({
-    tenantId: failedTenant.id,
-    buildingId: failedBuilding.id,
-    agencyId: agency.id,
-    checkoutRequestId: generateCheckoutRequestId(),
-    merchantRequestId: generateCheckoutRequestId(),
-    amount: String(parseFloat(String(failedUnit.rentAmount))),
-    phoneNumber: failedTenant.phone,
-    billingMonth: currentMonth,
-    status: "FAILED",
-    mpesaReceiptNumber: null,
-    resultCode: "400",
-    resultDesc: "Insufficient funds in M-Pesa account",
-    completedAt: null,
-  });
-
-  console.log(`   ✓ 4 pending/failed transactions created`);
-
-  // ── Complaints ─────────────────────────────────────────────────
-  console.log("🎫 Creating 5 Complaints...");
-  const complaintTitles = [
-    { title: "Leaking kitchen faucet", desc: "Water dripping continuously from the kitchen sink tap. Wastage concern.", priority: "HIGH" as const },
-    { title: "Power outage in Unit B2", desc: "No electricity since yesterday evening. Affected lighting and fridge.", priority: "URGENT" as const },
-    { title: "Broken gate lock", desc: "Main gate lock is jammed. Security concern for residents.", priority: "HIGH" as const },
-    { title: "Noise complaint from upstairs", desc: "Loud music and moving furniture past midnight. Disturbing sleep.", priority: "MEDIUM" as const },
-    { title: "Garbage not collected for 3 days", desc: "Piling up near the back entrance. Bad smell and health hazard.", priority: "MEDIUM" as const },
+  // John: paid Jan-Apr (partial Feb), arrears May-Jun
+  const johnRent = 25000;
+  const johnPayments = [
+    { month: "2026-01", paid: 25000, method: "MPESA_STK", ref: "MPESA-JOHN-001" },
+    { month: "2026-02", paid: 15000, method: "MPESA_STK", ref: "MPESA-JOHN-002" },
+    { month: "2026-03", paid: 25000, method: "CASH", ref: "CASH-JOHN-001" },
+    { month: "2026-04", paid: 25000, method: "BANK_RECEIPT", ref: "BANK-JOHN-001" },
+    { month: "2026-05", paid: 0, method: "SYSTEM", ref: null },
+    { month: "2026-06", paid: 0, method: "SYSTEM", ref: null },
   ];
-
-  const complaintTenants = tenants.slice(0, 5);
-  for (let i = 0; i < 5; i++) {
-    const tenant = complaintTenants[i];
-    const unit = allUnits.find((u) => u.id === tenant.unitId)!;
-    const building = buildings.find((b) => b.id === tenant.buildingId)!;
-    const complaintData = complaintTitles[i];
-
-    const [complaint] = await db
-      .insert(schema.complaints)
-      .values({
-        tenantId: tenant.id,
-        buildingId: building.id,
-        unitId: unit.id,
-        agencyId: agency.id,
-        title: complaintData.title,
-        description: complaintData.desc,
-        category: complaintData.priority,
-        priority: complaintData.priority,
-        imageUrl: i < 2 ? `https://picsum.photos/400/300?random=${i}` : null,
-        status: i < 2 ? "OPEN" : i < 4 ? "IN_PROGRESS" : "RESOLVED",
-        assignedTo: i < 2 ? null : fieldAgent.clerkUserId,
-        resolvedAt: i === 4 ? new Date(Date.now() - 86400000 * 2) : null,
-      })
-      .returning();
-
-    const updates = [
-      { note: "Ticket created and logged.", statusChange: "OPEN" },
-      { note: "Assigned to field agent for inspection.", statusChange: "IN_PROGRESS" },
-      { note: "Issue resolved. Tenant confirmed satisfaction.", statusChange: "RESOLVED" },
-    ];
-
-    const numUpdates = i === 4 ? 3 : i >= 2 ? 2 : 1;
-    for (let u = 0; u < numUpdates; u++) {
-      await db.insert(schema.complaintUpdates).values({
-        complaintId: complaint.id,
-        agencyId: agency.id,
-        note: updates[u].note,
-        statusChange: updates[u].statusChange,
-        updatedBy: u === 0 ? manager.clerkUserId : fieldAgent.clerkUserId,
+  for (const m of johnPayments) {
+    await insertOne("tenant_ledger", {
+      tenant_id: john.id,
+      building_id: b1.id,
+      agency_id: agency.id,
+      type: "DEBIT",
+      category: "RENT",
+      amount: String(johnRent),
+      billing_month: m.month,
+      description: `Rent for ${m.month}`,
+      method: "SYSTEM",
+      recorded_by: "SYSTEM",
+    });
+    if (m.paid > 0) {
+      await insertOne("tenant_ledger", {
+        tenant_id: john.id,
+        building_id: b1.id,
+        agency_id: agency.id,
+        type: "CREDIT",
+        category: "RENT",
+        amount: String(m.paid),
+        billing_month: m.month,
+        description: `Payment via ${m.method}`,
+        reference_code: m.ref,
+        method: m.method,
+        recorded_by: "SYSTEM",
       });
     }
   }
 
-  console.log(`   ✓ 5 complaints with updates created`);
+  // Grace: paid Jan-Feb, partial Mar, arrears Apr-Jun
+  const graceRent = 35000;
+  const gracePayments = [
+    { month: "2026-01", paid: 35000, method: "MPESA_STK", ref: "MPESA-GRACE-001" },
+    { month: "2026-02", paid: 35000, method: "MPESA_STK", ref: "MPESA-GRACE-002" },
+    { month: "2026-03", paid: 20000, method: "MPESA_STK", ref: "MPESA-GRACE-003" },
+    { month: "2026-04", paid: 0, method: "SYSTEM", ref: null },
+    { month: "2026-05", paid: 0, method: "SYSTEM", ref: null },
+    { month: "2026-06", paid: 0, method: "SYSTEM", ref: null },
+  ];
+  for (const m of gracePayments) {
+    await insertOne("tenant_ledger", {
+      tenant_id: grace.id,
+      building_id: b1.id,
+      agency_id: agency.id,
+      type: "DEBIT",
+      category: "RENT",
+      amount: String(graceRent),
+      billing_month: m.month,
+      description: `Rent for ${m.month}`,
+      method: "SYSTEM",
+      recorded_by: "SYSTEM",
+    });
+    if (m.paid > 0) {
+      await insertOne("tenant_ledger", {
+        tenant_id: grace.id,
+        building_id: b1.id,
+        agency_id: agency.id,
+        type: "CREDIT",
+        category: "RENT",
+        amount: String(m.paid),
+        billing_month: m.month,
+        description: `Payment via ${m.method}`,
+        reference_code: m.ref,
+        method: m.method,
+        recorded_by: "SYSTEM",
+      });
+    }
+  }
 
-  // ── Summary ────────────────────────────────────────────────────
+  // Peter: fully paid all months
+  const peterRent = 40000;
+  const peterMonths = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"];
+  let peterRef = 100;
+  for (const month of peterMonths) {
+    await insertOne("tenant_ledger", {
+      tenant_id: peter.id,
+      building_id: b2.id,
+      agency_id: agency.id,
+      type: "DEBIT",
+      category: "RENT",
+      amount: String(peterRent),
+      billing_month: month,
+      description: `Rent for ${month}`,
+      method: "SYSTEM",
+      recorded_by: "SYSTEM",
+    });
+    await insertOne("tenant_ledger", {
+      tenant_id: peter.id,
+      building_id: b2.id,
+      agency_id: agency.id,
+      type: "CREDIT",
+      category: "RENT",
+      amount: String(peterRent),
+      billing_month: month,
+      description: `Payment via MPESA`,
+      reference_code: `MPESA-PETER-${peterRef}`,
+      method: "MPESA_STK",
+      recorded_by: "SYSTEM",
+    });
+    peterRef++;
+  }
+
+  // Deposits
+  for (const { tenant, amount } of [
+    { tenant: john, amount: u1_b1.deposit_amount },
+    { tenant: grace, amount: u2_b1.deposit_amount },
+    { tenant: peter, amount: u1_b2.deposit_amount },
+  ]) {
+    await insertOne("tenant_ledger", {
+      tenant_id: tenant.id,
+      building_id: tenant.building_id,
+      agency_id: agency.id,
+      type: "DEBIT",
+      category: "DEPOSIT",
+      amount,
+      billing_month: "2026-01",
+      description: "Security deposit",
+      method: "SYSTEM",
+      recorded_by: "SYSTEM",
+    });
+  }
+
+  // ── Utility Readings ────────────────────────────────────────────────
+  console.log("💧 Creating utility readings...");
+  await insertOne("utility_readings", {
+    unit_id: u1_b1.id,
+    agency_id: agency.id,
+    building_id: b1.id,
+    utility_type: "WATER",
+    previous_reading: "120.00",
+    current_reading: "145.00",
+    units_consumed: "25.00",
+    rate_per_unit: "100.00",
+    total_charge: "2500.00",
+    billing_month: "2026-06",
+    recorded_by: fieldAgent.clerk_user_id,
+  });
+  await insertOne("utility_readings", {
+    unit_id: u2_b1.id,
+    agency_id: agency.id,
+    building_id: b1.id,
+    utility_type: "ELECTRICITY",
+    previous_reading: "500.00",
+    current_reading: "650.00",
+    units_consumed: "150.00",
+    rate_per_unit: "25.00",
+    total_charge: "3750.00",
+    billing_month: "2026-06",
+    recorded_by: fieldAgent.clerk_user_id,
+  });
+
+  // ── Complaints ──────────────────────────────────────────────────────
+  console.log("🎫 Creating complaints...");
+  const c1 = await insertOne("complaints", {
+    tenant_id: john.id,
+    agency_id: agency.id,
+    building_id: b1.id,
+    unit_id: u1_b1.id,
+    title: "Water leak in bathroom",
+    description: "Persistent water leak under the bathroom sink for 3 days.",
+    category: "PLUMBING",
+    status: "OPEN",
+    priority: "HIGH",
+    assigned_to: manager.clerk_user_id,
+  });
+
+  const c2 = await insertOne("complaints", {
+    tenant_id: grace.id,
+    agency_id: agency.id,
+    building_id: b1.id,
+    unit_id: u2_b1.id,
+    title: "Noisy neighbor",
+    description: "Loud music past midnight on weekdays.",
+    category: "NOISE",
+    status: "RESOLVED",
+    priority: "MEDIUM",
+    assigned_to: manager.clerk_user_id,
+    resolved_at: new Date().toISOString(),
+  });
+
+  await insertOne("complaint_updates", {
+    complaint_id: c1.id,
+    agency_id: agency.id,
+    author_clerk_id: manager.clerk_user_id,
+    message: "Plumber scheduled for tomorrow.",
+  });
+  await insertOne("complaint_updates", {
+    complaint_id: c2.id,
+    agency_id: agency.id,
+    author_clerk_id: manager.clerk_user_id,
+    message: "Spoke with neighbor. Agreement reached.",
+    status_change: "RESOLVED",
+  });
+
+  // ── Pending Transactions ────────────────────────────────────────────
+  console.log("💳 Creating pending transactions...");
+  await insertOne("pending_transactions", {
+    tenant_id: john.id,
+    building_id: b1.id,
+    agency_id: agency.id,
+    checkout_request_id: "ws_co_001",
+    merchant_request_id: "ws_mr_001",
+    amount: "25000",
+    phone: john.phone,
+    billing_month: "2026-07",
+    status: "PENDING",
+  });
+  await insertOne("pending_transactions", {
+    tenant_id: grace.id,
+    building_id: b1.id,
+    agency_id: agency.id,
+    checkout_request_id: "ws_co_002",
+    merchant_request_id: "ws_mr_002",
+    amount: "35000",
+    phone: grace.phone,
+    billing_month: "2026-07",
+    status: "FAILED",
+    result_code: "400",
+    result_desc: "Insufficient funds",
+  });
+
+  // ── Summary ─────────────────────────────────────────────────────────
   console.log("\n" + "=".repeat(60));
-  console.log("🎉 SEED COMPLETE — PropFlow Kenya Test Data");
+  console.log("✅ SEED COMPLETE");
   console.log("=".repeat(60));
-  console.log(`Agency:        ${agency.name}`);
-  console.log(`Buildings:     ${buildings.length}`);
-  console.log(`Units:         ${allUnits.length} (20 total, 15 occupied)`);
-  console.log(`Tenants:       ${tenants.length} active`);
-  console.log(`Leases:        ${leases.length}`);
-  console.log(`Staff:         2 (Manager + Field Agent)`);
-  console.log(`Ledger:        ${ledgerCount} entries (3 months history)`);
-  console.log(`Complaints:    5 (2 open, 2 in-progress, 1 resolved)`);
-  console.log(`Transactions:  4 (3 pending + 1 failed)`);
+  console.log(`Agency:     ${agency.name}`);
+  console.log(`Buildings:  2 (Westlands Heights, Karen Gardens)`);
+  console.log(`Units:      6 (4 occupied, 2 vacant)`);
+  console.log(`Tenants:    3`);
+  console.log(`Leases:     3`);
+  console.log(`Staff:      1 Manager, 1 Field Agent`);
   console.log("=".repeat(60));
-  console.log("\n📋 QA Walkthrough Ready:");
-  console.log("   • Super Admin: View agency, toggle kill switch");
-  console.log("   • Agency Owner: Buildings, units, Daraja config");
-  console.log("   • Manager: Tenant invites, complaints, lease view");
-  console.log("   • Field Agent: Meter readings, manual receipts");
-  console.log("   • Tenant: Balance, pay rent, sign lease, file complaint");
-  console.log("\n💡 Next: Run 'npm run dev' and sign in with test Clerk IDs");
-  console.log("   Manager:    clerk_manager_001");
-  console.log("   Field Agent: clerk_agent_001");
-  console.log("   Tenant 1:   clerk_tenant_1");
-  console.log("   Tenant 2:   clerk_tenant_2");
+  console.log("\nBalances:");
+  console.log("  John Kamau    — KES 50,000 arrears (May-Jun unpaid)");
+  console.log("  Grace Wanjiku — KES 125,000 arrears (partial Mar, Apr-Jun unpaid)");
+  console.log("  Peter Ochieng — KES 0 (fully paid)");
   console.log("=".repeat(60));
 
   await pool.end();
-  process.exit(0);
 }
 
 seed().catch((err) => {

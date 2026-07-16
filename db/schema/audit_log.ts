@@ -1,42 +1,48 @@
-/**
- * AUDIT_LOG Schema — Phase B Foundation (created in Phase A migration)
- * 
- * This table is append-only. The application should never UPDATE or DELETE rows.
- * DB-level permissions should revoke UPDATE/DELETE from the app role.
- * 
- * Populated by:
- * - Super Admin bypass logging (lib/db/rls.ts)
- * - Application-level audit hooks (to be built in Phase B)
- * - DB triggers (optional, for low-level change tracking)
- */
+// lib/db/schema/audit_log.ts
+// Phase B — Append-only audit trail. Every mutation that touches money,
+// identity, or access control MUST call logAuditEvent().
+//
+// SECURITY: This table is append-only at the Postgres level (see sql/append-only.sql).
+// The application role has INSERT only — no UPDATE, no DELETE.
 
-import { pgTable, uuid, text, timestamp, jsonb, inet } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { roleEnum } from "./enums";
 
 export const auditLog = pgTable("audit_log", {
   id: uuid("id").primaryKey().defaultRandom(),
 
-  // Who did it
+  // ── Actor ───────────────────────────────────────────────────────────────
   actorClerkId: text("actor_clerk_id").notNull(),
-  actorRole: text("actor_role").notNull(),
+  actorRole: roleEnum("actor_role").notNull(),
 
-  // Which agency (null for Super Admin cross-agency actions)
-  agencyId: uuid("agency_id"),
+  // ── Scope ───────────────────────────────────────────────────────────────
+  agencyId: uuid("agency_id"), // null for super-admin cross-agency actions
 
-  // What happened
-  action: text("action").notNull(), // "READ", "WRITE", "DELETE", "SUPER_ADMIN_BYPASS", "ROLE_CHANGE", etc.
+  // ── Action ──────────────────────────────────────────────────────────────
+  action: text("action").notNull(),
+  // Actions:
+  //   ROLE_CHANGE, DARAJA_CREDENTIAL_UPDATE, RENT_AMOUNT_EDIT,
+  //   DEPOSIT_AMOUNT_EDIT, KILL_SWITCH_TOGGLE, NATIONAL_ID_ACCESS,
+  //   TENANT_REMOVE, STAFF_REMOVE, MANUAL_LEDGER_ENTRY, LEDGER_REVERSAL,
+  //   STAFF_INVITE, TENANT_INVITE, TENANT_VACATE, COMPLAINT_ASSIGN,
+  //   UTILITY_RATE_CHANGE, BUILDING_CREATE, BUILDING_DELETE
+
   targetTable: text("target_table").notNull(),
-  targetId: text("target_id"), // Primary key of affected row
+  targetId: text("target_id").notNull(), // primary key of the affected row
 
-  // Change details
-  beforeValue: jsonb("before_value"), // Previous state (for updates)
-  afterValue: jsonb("after_value"), // New state
+  // ── Snapshots ───────────────────────────────────────────────────────────
+  // Store the full row state before and after the mutation.
+  // Use jsonb for indexing, querying, and diffing.
+  beforeValue: jsonb("before_value"),
+  afterValue: jsonb("after_value"),
 
-  // Request context
-  ipAddress: inet("ip_address"),
+  // ── Context ─────────────────────────────────────────────────────────────
+  ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
 
+  // ── Timestamp ───────────────────────────────────────────────────────────
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export type AuditLog = typeof auditLog.$inferSelect;
-export type InsertAuditLog = typeof auditLog.$inferInsert;
+export type AuditLogEntry = typeof auditLog.$inferSelect;
+export type InsertAuditLogEntry = typeof auditLog.$inferInsert;

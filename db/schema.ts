@@ -7,6 +7,7 @@ import {
   boolean,
   numeric,
   date,
+  jsonb,
 } from "drizzle-orm/pg-core";
 
 // ── Enums ──────────────────────────────────────────────────────────
@@ -455,6 +456,26 @@ export type InsertAgencySubscription = typeof agencySubscriptions.$inferInsert;
 export type SubscriptionPayment = typeof subscriptionPayments.$inferSelect;
 export type InsertSubscriptionPayment = typeof subscriptionPayments.$inferInsert;
 
-export function auditLog(auditLog: any) {
-    throw new Error("Function not implemented.");
+// ── Audit Log ──────────────────────────────────────────────────────
+
+export const auditLog = pgTable("audit_log", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  actorClerkId: text("actor_clerk_id").notNull(),
+  actorRole: roleEnum("actor_role").notNull(),
+  agencyId: uuid("agency_id"),
+  action: text("action").notNull(),
+  targetTable: text("target_table").notNull(),
+  targetId: text("target_id").notNull(),
+  beforeValue: jsonb("before_value"),
+  afterValue: jsonb("after_value"),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type AuditLogEntry = typeof auditLog.$inferSelect;
+export type InsertAuditLogEntry = typeof auditLog.$inferInsert;
+export function notifications(notifications: any) {
+  throw new Error("Function not implemented.");
 }
+

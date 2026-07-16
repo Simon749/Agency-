@@ -7,16 +7,16 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 });
 
-export async function getCachedBalance(tenantId: string) {
-  const key = `balance:${tenantId}`;
+export async function getCachedBalance(tenantId: string, agencyId: string) {
+  const key = `balance:${agencyId}:${tenantId}`; // ← include agencyId in the key too
   const cached = await redis.get(key);
   if (cached) return JSON.parse(cached as string);
-  
-  const balance = await getTenantBalance(tenantId); // your existing function
-  await redis.setex(key, 30, JSON.stringify(balance)); // 30s TTL
+
+  const balance = await getTenantBalance(tenantId, agencyId);
+  await redis.setex(key, 30, JSON.stringify(balance));
   return balance;
 }
 
-export async function invalidateBalance(tenantId: string) {
-  await redis.del(`balance:${tenantId}`);
+export async function invalidateBalance(tenantId: string, agencyId: string) {
+  await redis.del(`balance:${agencyId}:${tenantId}`);
 }

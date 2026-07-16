@@ -6,7 +6,6 @@ export { getTenantBalance, getTenantBalanceForMonth, type BalanceResult } from "
 export {
   getTenantStatement,
   getRecentLedgerEntries,
-  getLedgerEntriesPaginated,
   type StatementRow,
   type MonthlyGroup,
 } from "./getStatement";
