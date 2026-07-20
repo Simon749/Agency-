@@ -19,7 +19,9 @@ export * from "./utility_readings";
 export * from "./pending_transactions";
 export * from "./complaints";
 export * from "./notifications";
-export * from "./audit_log";           // ← PHASE B: NEW
+export * from "./audit_log"; 
+export * from "./ledgerAllocations";
+export * from "./balanceSnapshots";         
 export { staff } from "./staff";
 export type { Staff, InsertStaff } from "./staff";
 export type { AuditLogEntry, InsertAuditLogEntry } from "./audit_log";  // ← PHASE B: NEW

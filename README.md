@@ -54,12 +54,19 @@ npx drizzle-kit push
 npm run db:seed
 
 
-psql "$DATABASE_URL" -c "\dt buildings" 
-psql "$DATABASE_URL" -c "SELECT tableowner FROM pg_tables WHERE tablename = 'buildings';"
-psql 'postgresql://neondb_owner:npg_b9dArXDNqw4p@ep-purple-cake-aqhbxrfh-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
-psql "$DATABASE_URL" -c "\d agencies"
+// Still wrong:
+const result = await insertPaymentCredit(db, { ... });
 
-npx drizzle-kit push --force 2>&1 | tee /tmp/push-output.txt
-cat /tmp/push-output.txt
-
-psql "$DATABASE_URL" -c "\d agencies" 2>&1
+// Fix:
+const result = await insertPaymentCredit({
+  tenantId,
+  buildingId: tenant.buildingId,
+  agencyId: agencyId!,
+  category: 'RENT',
+  amount: amount.toFixed(2),
+  billingMonth,
+  description,
+  referenceCode: referenceCode || `CASH-${Date.now()}`,
+  method: 'CASH',
+  recordedBy: userId,
+});

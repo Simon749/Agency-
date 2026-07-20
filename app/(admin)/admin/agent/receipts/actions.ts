@@ -8,6 +8,7 @@ import { tenantLedger, tenants } from '@/db/schema';
 import { getSessionMeta } from '@/lib/auth/getRole';
 import { insertPaymentCredit } from '@/lib/ledger';
 import { revalidatePath } from 'next/cache';
+import { allocatePayment } from '@/lib/ledger/allocatePayment';
 
 export async function recordCashPayment(formData: FormData) {
   const { userId } = await auth();
@@ -53,17 +54,31 @@ export async function recordCashPayment(formData: FormData) {
   }
 
   const result = await insertPaymentCredit({
-    tenantId,
-    buildingId: tenant.buildingId,
-    agencyId: agencyId!,
-    category: 'RENT',
-    amount: amount.toFixed(2),
-    billingMonth,
-    description,
-    referenceCode: referenceCode || `CASH-${Date.now()}`,
-    method: 'CASH',
-    recordedBy: userId,
-  });
+  tenantId,
+  buildingId: tenant.buildingId,
+  agencyId: agencyId!,
+  category: 'RENT',
+  amount: amount.toFixed(2),
+  billingMonth,
+  description,
+  referenceCode: referenceCode || `CASH-${Date.now()}`,
+  method: 'CASH',
+  recordedBy: userId,
+},
+userId
+);
+
+  const ledgerId = result.ledgerId;
+  if (!ledgerId) throw new Error('Missing ledger id for payment allocation');
+
+  try {
+    await allocatePayment(tenantId, ledgerId);
+  } catch (err) {
+    console.error(`[RECEIPTS] Allocation failed for ${ledgerId}:`, err);
+    // Surface a toast warning here if you want the agent to know allocation
+    // needs a manual look — but the payment itself has already been recorded
+    // and should not be blocked or rolled back.
+  }
 
   revalidatePath('/admin/agent/receipts');
   revalidatePath(`/admin/tenants/${tenantId}/ledger`);

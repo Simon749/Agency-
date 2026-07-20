@@ -430,3 +430,46 @@ export async function sendTenantInviteSms(
 
   return safeSend(tenant.phone, message);
 }
+
+// ── ADDITION to lib/sms/triggers.ts ──────────────────────────────────────
+// Insert this alongside sendPaymentReceivedSms / sendPaymentFailedSms
+// (same file, same pattern — fetch tenant, build message via templates,
+// safeSend). Needed by app/(admin)/refunds/actions.ts (refundDuplicatePayment).
+
+// ── 9. Refund Confirmation (from the refund runbook, after B2C initiation) ──
+
+export async function sendRefundConfirmationSms(
+  tenantId: string,
+  amount: number | string,
+  reason?: string
+): Promise<boolean> {
+  const db = getDb();
+  const [tenant] = await db
+    .select({
+      fullName: tenants.fullName,
+      phone: tenants.phone,
+      buildingId: tenants.buildingId,
+    })
+    .from(tenants)
+    .where(eq(tenants.id, tenantId));
+
+  if (!tenant) return false;
+
+  let buildingName: string | undefined;
+  if (tenant.buildingId) {
+    const [b] = await db
+      .select({ name: buildings.name })
+      .from(buildings)
+      .where(eq(buildings.id, tenant.buildingId));
+    buildingName = b?.name;
+  }
+
+  const message = templates.refundConfirmationSms({
+    tenantName: tenant.fullName,
+    amount,
+    reason,
+    buildingName,
+  });
+
+  return safeSend(tenant.phone, message);
+}

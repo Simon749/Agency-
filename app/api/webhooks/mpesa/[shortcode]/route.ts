@@ -9,6 +9,7 @@ import { eq, and } from "drizzle-orm";
 import { getPendingTransaction, insertPaymentCredit } from "@/lib/ledger";
 import { sendPaymentReceivedSms, sendPaymentFailedSms } from "@/lib/sms/triggers";
 import type { StkCallbackBody } from "@/lib/daraja/types";
+import { allocatePayment } from "@/lib/ledger/allocatePayment";
 
 // ── Redis dedup cache (production-grade, survives cold starts) ─────────────
 // FALLBACK: In-memory Map if Redis is not configured (dev only)
@@ -180,6 +181,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sho
       },
       "DARAJA_WEBHOOK" // recordedBy — audit trail
     );
+
+    if (!ledgerResult.alreadyExists) {
+      if (!ledgerResult.ledgerId) {
+        console.error("[WEBHOOK] Missing ledgerId for allocation");
+      } else {
+        try {
+          await allocatePayment(pendingTx.tenantId, ledgerResult.ledgerId);
+        } catch (err) {
+          console.error(`[WEBHOOK] Allocation failed for ${ledgerResult.ledgerId}:`, err);
+          // Don't rethrow — the payment is already recorded. Surface this via
+          // your existing error monitoring instead so it gets a manual look.
+        }
+      }
+    }
 
     // ── Update pending transaction ──
     await db.update(pendingTransactions)

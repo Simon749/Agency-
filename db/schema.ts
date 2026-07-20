@@ -266,6 +266,8 @@ export const tenantLedger = pgTable("tenant_ledger", {
   description: text("description").notNull(),
   billingMonth: text("billing_month"),
   recordedBy: text("recorded_by"),
+  isReversal: boolean("is_reversal").default(false).notNull(),
+  reversesEntryId: uuid("reverses_entry_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -305,8 +307,8 @@ export const pendingTransactions = pgTable("pending_transactions", {
   phone: text("phone").notNull(),
   status: transactionStatusEnum("status").default("PENDING").notNull(),
   mpesaCode: text("mpesa_code").unique(),
-  resultCode: text("result_code"),       
-  resultDesc: text("result_desc"),        
+  resultCode: text("result_code"),
+  resultDesc: text("result_desc"),
   failureReason: text("failure_reason"),
   initiatedAt: timestamp("initiated_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),

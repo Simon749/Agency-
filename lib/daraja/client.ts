@@ -92,7 +92,7 @@ export async function initiateStkPush(
   const [recentPending] = await db
     .select({
       checkoutRequestId: pendingTransactions.checkoutRequestId,
-      createdAt: pendingTransactions.createdAt,
+      initiatedAt: pendingTransactions.initiatedAt,
       amount: pendingTransactions.amount,
     })
     .from(pendingTransactions)
@@ -103,10 +103,10 @@ export async function initiateStkPush(
         eq(pendingTransactions.buildingId, buildingId)
       )
     )
-    .orderBy(pendingTransactions.createdAt) // oldest first
+    .orderBy(pendingTransactions.initiatedAt) // oldest first
     .limit(1);
 
-  if (recentPending && new Date(recentPending.createdAt) > fiveMinutesAgo) {
+  if (recentPending && new Date(recentPending.initiatedAt) > fiveMinutesAgo) {
     throw new Error(
       `An STK Push is already pending for this tenant (started ${recentPending.checkoutRequestId}). ` +
       `Please wait for the M-Pesa prompt to complete or expire before trying again.`

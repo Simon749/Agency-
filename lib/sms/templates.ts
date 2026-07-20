@@ -164,3 +164,22 @@ export function trialEndingSms(params: {
   const { agencyName, trialEndsDate, starterAmount } = params;
   return `PropFlow: Hi ${agencyName}, your free trial ends on ${trialEndsDate}. Upgrade to Starter (KES ${starterAmount}/mo) to keep your account active. Log in to subscribe.`;
 }
+
+export interface RefundConfirmationSmsParams {
+  tenantName: string;
+  amount: number | string;
+  reason?: string;
+  buildingName?: string;
+}
+
+export function refundConfirmationSms(params: RefundConfirmationSmsParams): string {
+  const { tenantName, amount, buildingName } = params;
+  const firstName = tenantName.split(" ")[0];
+  const amountStr = typeof amount === "number" ? amount.toFixed(2) : amount;
+
+  return (
+    `Hi ${firstName}, a refund of KES ${amountStr} has been sent to your M-Pesa` +
+    `${buildingName ? ` for ${buildingName}` : ""}. ` +
+    `You should receive it shortly. Contact your property manager with any questions. - PropFlow`
+  );
+}

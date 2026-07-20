@@ -7,7 +7,7 @@ import { getDb } from "@/lib/db";
 import { tenants, buildings, tenantLedger } from "@/db/schema";
 import { insertPaymentCredit } from "@/lib/ledger";
 import type { C2BConfirmationRequest, DarajaCallbackResponse } from "@/lib/daraja/types";
-
+import { allocatePayment } from "@/lib/ledger/allocatePayment";
 // Safaricom Daraja IP ranges
 const SAFARICOM_IP_RANGES = ["197.248.", "41.215."];
 
@@ -171,6 +171,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sho
       },
       "DARAJA_C2B" // recordedBy — audit trail
     );
+
+    if (!ledgerResult.alreadyExists) {
+      const ledgerId = ledgerResult.ledgerId;
+      if (ledgerId) {
+        try {
+          await allocatePayment(tenant.id, ledgerId);
+        } catch (err) {
+          console.error(`[C2B] Allocation failed for ${ledgerId}:`, err);
+        }
+      } else {
+        console.error("[C2B] Missing ledgerId for allocated payment");
+      }
+    }
 
     const response: DarajaCallbackResponse = {
       ResultCode: "0",
