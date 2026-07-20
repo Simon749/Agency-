@@ -19,9 +19,11 @@ export * from "./utility_readings";
 export * from "./pending_transactions";
 export * from "./complaints";
 export * from "./notifications";
-export * from "./audit_log"; 
+export * from "./audit_log";
 export * from "./ledgerAllocations";
-export * from "./balanceSnapshots";         
+export * from "./balanceSnapshots";
+export * from "./reconciliation_discrepancies";
 export { staff } from "./staff";
 export type { Staff, InsertStaff } from "./staff";
+export type { ReconciliationDiscrepancy, InsertReconciliationDiscrepancy } from "./reconciliation_discrepancies";
 export type { AuditLogEntry, InsertAuditLogEntry } from "./audit_log";  // ← PHASE B: NEW

@@ -25,6 +25,10 @@
       "schedule": "0 2 * * *"
     },
     {
+      "path": "/api/cron/reconciliation",
+      "schedule": "0 3 * * *"
+    },
+    {
       "path": "/api/cron/backup-critical-data",
       "schedule": "0 3 * * *"
     },

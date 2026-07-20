@@ -11,6 +11,10 @@ import { entryTypeEnum, categoryEnum, paymentMethodEnum } from "./enums";
  * CREDIT row (so existing SUM(DEBIT)-SUM(CREDIT) balance math needs zero
  * changes) that is flagged as offsetting a prior entry. The original row is
  * never touched — see lib/ledger/reverseLedgerEntry.ts.
+ *
+ * PHASE D: added maker-checker approval workflow. Field Agent submissions go
+ * through PENDING_APPROVAL before affecting the live balance. Only MANAGER or
+ * AGENCY_OWNER can approve/reject.
  */
 export const tenantLedger = pgTable("tenant_ledger", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -37,10 +41,20 @@ export const tenantLedger = pgTable("tenant_ledger", {
   // migration SQL. Query it like any other column.
   reversesEntryId: uuid("reverses_entry_id"),
 
+  // ── PHASE D: maker-checker approval ──
+  approvalStatus: text("approval_status").default("APPROVED").notNull(),
+  // "APPROVED" | "PENDING_APPROVAL" | "REJECTED"
+
+  submittedBy: text("submitted_by"), // Field Agent who submitted (for PENDING entries)
+  approvedBy: text("approved_by"),   // Manager who approved
+  approvedAt: timestamp("approved_at"),
+  rejectionReason: text("rejection_reason"), // Why it was rejected
+
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   uniqueIndex("idx_ledger_reference_code").on(table.referenceCode),
   index("idx_ledger_reverses_entry").on(table.reversesEntryId),
+  index("idx_ledger_approval_status").on(table.agencyId, table.approvalStatus), // ← PHASE D: for pending approvals query
 ]);
 
 export type TenantLedgerEntry = typeof tenantLedger.$inferSelect;

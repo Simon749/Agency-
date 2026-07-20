@@ -268,6 +268,7 @@ export const tenantLedger = pgTable("tenant_ledger", {
   recordedBy: text("recorded_by"),
   isReversal: boolean("is_reversal").default(false).notNull(),
   reversesEntryId: uuid("reverses_entry_id"),
+  rejectionReason: text("rejection_reason"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -412,6 +413,27 @@ export const subscriptionPayments = pgTable("subscription_payments", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+
+// ── reconciliation_discrepancies ───────────────────────────────────────────────
+
+export const reconciliationDiscrepancies = pgTable("reconciliation_discrepancies", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  agencyId: uuid("agency_id").notNull(),
+  buildingId: uuid("building_id").notNull(),
+  discrepancyType: text("discrepancy_type").notNull(), // "DARAJA_MISSING", "LEDGER_MISSING", "AMOUNT_MISMATCH"
+  darajaTransactionId: text("daraja_transaction_id"),
+  ledgerEntryId: uuid("ledger_entry_id"),
+  amount: numeric("amount", { precision: 10, scale: 2 }),
+  expectedAmount: numeric("expected_amount", { precision: 10, scale: 2 }),
+  transactionDate: timestamp("transaction_date"),
+  status: text("status").default("UNRESOLVED"), // "UNRESOLVED", "INVESTIGATING", "RESOLVED"
+  resolvedAt: timestamp("resolved_at"),
+  resolvedBy: text("resolved_by"), // clerk ID
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+
 // ── Type Exports ───────────────────────────────────────────────────
 
 export type Agency = typeof agencies.$inferSelect;
@@ -446,6 +468,9 @@ export type InsertComplaint = typeof complaints.$inferInsert;
 
 export type ComplaintUpdate = typeof complaintUpdates.$inferSelect;
 export type InsertComplaintUpdate = typeof complaintUpdates.$inferInsert;
+
+export type ReconciliationDiscrepancy = typeof reconciliationDiscrepancies.$inferSelect;
+export type InsertReconciliationDiscrepancy = typeof reconciliationDiscrepancies.$inferInsert;
 
 export type Staff = typeof staff.$inferSelect;
 export type InsertStaff = typeof staff.$inferInsert;
