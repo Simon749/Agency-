@@ -35,12 +35,11 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Billing complete for ${summary.billingMonth}`,
+      message: `Billing fan-out complete for ${summary.billingMonth}`,
       summary: {
+        totalBuildings: summary.totalBuildings,
         totalTenants: summary.totalTenants,
-        entriesInserted: summary.totalEntriesInserted,
-        amountBilled: summary.totalAmountBilled,
-        skipped: summary.skipped,
+        jobsEnqueued: summary.jobsEnqueued,
         errors: summary.errors,
       },
     });

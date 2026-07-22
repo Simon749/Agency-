@@ -54,19 +54,6 @@ npx drizzle-kit push
 npm run db:seed
 
 
-// Still wrong:
-const result = await insertPaymentCredit(db, { ... });
+// route.ts — report what the orchestrator actually knows
+const summary = await runMonthlyBilling(targetMonth);
 
-// Fix:
-const result = await insertPaymentCredit({
-  tenantId,
-  buildingId: tenant.buildingId,
-  agencyId: agencyId!,
-  category: 'RENT',
-  amount: amount.toFixed(2),
-  billingMonth,
-  description,
-  referenceCode: referenceCode || `CASH-${Date.now()}`,
-  method: 'CASH',
-  recordedBy: userId,
-});

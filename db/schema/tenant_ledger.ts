@@ -1,20 +1,21 @@
+// lib/db/schema/tenant_ledger.ts
+// UPDATED FOR PHASE F: Added idempotency constraint for billing cron
+// The unique index on (tenantId, billingMonth, category) prevents double-billing.
+
 import { pgTable, uuid, text, numeric, timestamp, uniqueIndex, boolean, index } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { tenants } from "./tenants";
 import { buildings } from "./buildings";
 import { entryTypeEnum, categoryEnum, paymentMethodEnum } from "./enums";
 
 /**
  * THE CORE TABLE — append-only, never update or delete rows.
- * Balance is always calculated from the sum of all rows (see lib/ledger/getBalance.ts).
+ * Balance is always calculated from the sum of all rows.
  *
- * PHASE C: added isReversal / reversesEntryId. A reversal is a normal DEBIT or
- * CREDIT row (so existing SUM(DEBIT)-SUM(CREDIT) balance math needs zero
- * changes) that is flagged as offsetting a prior entry. The original row is
- * never touched — see lib/ledger/reverseLedgerEntry.ts.
- *
- * PHASE D: added maker-checker approval workflow. Field Agent submissions go
- * through PENDING_APPROVAL before affecting the live balance. Only MANAGER or
- * AGENCY_OWNER can approve/reject.
+ * PHASE C: Reversals via isReversal + reversesEntryId.
+ * PHASE D: Maker-checker approval workflow.
+ * PHASE F: Idempotency constraint on (tenantId, billingMonth, category)
+ *          to prevent double-billing from cron retries.
  */
 export const tenantLedger = pgTable("tenant_ledger", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -36,25 +37,35 @@ export const tenantLedger = pgTable("tenant_ledger", {
 
   // ── PHASE C: reversals ──
   isReversal: boolean("is_reversal").default(false).notNull(),
-  // Plain uuid, not a drizzle .references() self-FK (avoids the circular-type
-  // headache) — the actual foreign key is added at the DB level in the
-  // migration SQL. Query it like any other column.
   reversesEntryId: uuid("reverses_entry_id"),
 
   // ── PHASE D: maker-checker approval ──
   approvalStatus: text("approval_status").default("APPROVED").notNull(),
-  // "APPROVED" | "PENDING_APPROVAL" | "REJECTED"
-
-  submittedBy: text("submitted_by"), // Field Agent who submitted (for PENDING entries)
-  approvedBy: text("approved_by"),   // Manager who approved
+  submittedBy: text("submitted_by"),
+  approvedBy: text("approved_by"),
   approvedAt: timestamp("approved_at"),
-  rejectionReason: text("rejection_reason"), // Why it was rejected
+  rejectionReason: text("rejection_reason"),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
+  // ── PHASE F: IDEMPOTENCY ──
+  // This prevents the billing cron from double-charging a tenant for the same
+  // category in the same month. If cron runs twice, the second run hits this
+  // constraint and skips the insert (handled gracefully in the batch worker).
+  uniqueIndex("idx_ledger_tenant_month_category")
+    .on(table.tenantId, table.billingMonth, table.category)
+    // Partial index: only enforce for DEBIT entries (billing charges)
+    // CREDIT entries (payments) use referenceCode uniqueness instead
+    .where(sql`${table.type} = 'DEBIT'`),
+
+  // Existing indexes preserved
   uniqueIndex("idx_ledger_reference_code").on(table.referenceCode),
   index("idx_ledger_reverses_entry").on(table.reversesEntryId),
-  index("idx_ledger_approval_status").on(table.agencyId, table.approvalStatus), // ← PHASE D: for pending approvals query
+  index("idx_ledger_approval_status").on(table.agencyId, table.approvalStatus),
+
+  // Additional indexes for billing cron performance
+  index("idx_ledger_tenant_billing_month").on(table.tenantId, table.billingMonth),
+  index("idx_ledger_agency_created").on(table.agencyId, table.createdAt),
 ]);
 
 export type TenantLedgerEntry = typeof tenantLedger.$inferSelect;

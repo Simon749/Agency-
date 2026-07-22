@@ -13,6 +13,8 @@ export interface BillingEntry {
   category: string; amount: number; description: string; billingMonth: string;
 }
 export interface MonthlyBillingSummary {
+  jobsEnqueued: any;
+  totalBuildings: any;
   billingMonth: string; totalTenants: number; totalEntriesInserted: number;
   totalAmountBilled: number; skipped: number; errors: number; details: BillingResult[];
 }

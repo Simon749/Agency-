@@ -8,6 +8,7 @@ import {
   numeric,
   date,
   jsonb,
+  integer,
 } from "drizzle-orm/pg-core";
 
 // ── Enums ──────────────────────────────────────────────────────────
@@ -198,6 +199,28 @@ export const units = pgTable("units", {
   isOccupied: boolean("is_occupied").default(false).notNull(),
 });
 
+
+// ── Billing Runs ──────────────────────────────────────────────────
+
+export const billingRuns = pgTable("billing_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  agencyId: uuid("agency_id").notNull(),
+  buildingId: uuid("building_id").notNull(),
+  billingMonth: text("billing_month").notNull(),
+  status: text("status").default("PENDING").notNull(),
+  attemptCount: integer("attempt_count").default(0).notNull(),
+  maxAttempts: integer("max_attempts").default(3).notNull(),
+  totalTenants: integer("total_tenants").default(0),
+  processedTenants: integer("processed_tenants").default(0),
+  entriesInserted: integer("entries_inserted").default(0),
+  entriesSkipped: integer("entries_skipped").default(0),
+  errorMessage: text("error_message"),
+  errorDetails: jsonb("error_details"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // ── Tenants ────────────────────────────────────────────────────────
 
 export const tenants = pgTable("tenants", {
@@ -266,6 +289,7 @@ export const tenantLedger = pgTable("tenant_ledger", {
   description: text("description").notNull(),
   billingMonth: text("billing_month"),
   recordedBy: text("recorded_by"),
+  approvalStatus: text("approval_status").notNull().default("PENDING"),
   isReversal: boolean("is_reversal").default(false).notNull(),
   reversesEntryId: uuid("reverses_entry_id"),
   rejectionReason: text("rejection_reason"),
