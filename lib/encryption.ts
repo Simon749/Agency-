@@ -1,41 +1,75 @@
-// lib/encryption.ts
-// Encrypt/decrypt Daraja credentials using AES-256-GCM
-// In production, use @vercel/kms or AWS KMS. This is app-level encryption.
+import crypto from "crypto";
 
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "crypto";
+/**
+ * Versioned AES-256-GCM encryption for credentials at rest (Daraja keys, etc.)
+ *
+ * Env vars expected:
+ *   ENCRYPTION_KEY_CURRENT_VERSION=2
+ *   ENCRYPTION_KEY_V1=<64-char hex, 32 bytes>
+ *   ENCRYPTION_KEY_V2=<64-char hex, 32 bytes>
+ *
+ * Stored format: "v<version>:<ivHex>:<authTagHex>:<ciphertextHex>"
+ */
 
 const ALGORITHM = "aes-256-gcm";
-const ENCRYPTION_KEY = process.env.APP_SECRET;
+const IV_LENGTH = 12; // recommended for GCM
 
-if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length < 32) {
-  throw new Error(
-    "APP_SECRET must be set and at least 32 characters long for encryption."
-  );
+function getCurrentVersion(): number {
+  const v = process.env.ENCRYPTION_KEY_CURRENT_VERSION;
+  if (!v) throw new Error("ENCRYPTION_KEY_CURRENT_VERSION is not set");
+  return parseInt(v, 10);
 }
 
-// Derive a fixed 32-byte key from APP_SECRET
-const KEY = scryptSync(ENCRYPTION_KEY, "propflow-salt", 32);
-
-export function encrypt(text: string): string {
-  const iv = randomBytes(16);
-  const cipher = createCipheriv(ALGORITHM, KEY, iv);
-  const encrypted = Buffer.concat([cipher.update(text, "utf8"), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  // Store as: iv:authTag:encrypted (all hex)
-  return `${iv.toString("hex")}:${authTag.toString("hex")}:${encrypted.toString("hex")}`;
-}
-
-export function decrypt(encryptedText: string): string {
-  const [ivHex, authTagHex, encryptedHex] = encryptedText.split(":");
-  if (!ivHex || !authTagHex || !encryptedHex) {
-    throw new Error("Invalid encrypted text format");
+function getKeyForVersion(version: number): Buffer {
+  const envKey = process.env[`ENCRYPTION_KEY_V${version}`];
+  if (!envKey) throw new Error(`ENCRYPTION_KEY_V${version} is not set`);
+  const key = Buffer.from(envKey, "hex");
+  if (key.length !== 32) {
+    throw new Error(`ENCRYPTION_KEY_V${version} must be 32 bytes (64 hex chars)`);
   }
+  return key;
+}
+
+/** Encrypt plaintext using the CURRENT key version. */
+export function encryptCredential(plaintext: string): string {
+  const version = getCurrentVersion();
+  const key = getKeyForVersion(version);
+  const iv = crypto.randomBytes(IV_LENGTH);
+
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+
+  return `v${version}:${iv.toString("hex")}:${authTag.toString("hex")}:${encrypted.toString("hex")}`;
+}
+
+/** Decrypt a stored credential, using whichever key version it was encrypted under. */
+export function decryptCredential(stored: string): string {
+  const parts = stored.split(":");
+  if (parts.length !== 4) throw new Error("Malformed encrypted credential");
+  const [versionTag, ivHex, authTagHex, cipherHex] = parts;
+
+  const version = parseInt(versionTag.replace("v", ""), 10);
+  const key = getKeyForVersion(version);
+
   const iv = Buffer.from(ivHex, "hex");
   const authTag = Buffer.from(authTagHex, "hex");
-  const encrypted = Buffer.from(encryptedHex, "hex");
+  const ciphertext = Buffer.from(cipherHex, "hex");
 
-  const decipher = createDecipheriv(ALGORITHM, KEY, iv);
+  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(authTag);
-  const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+  const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+
   return decrypted.toString("utf8");
+}
+
+/**
+ * Re-encrypt a credential under the CURRENT key version.
+ * Used by scripts/rotate-keys.ts — decrypts under whatever version it was
+ * stored with, then re-encrypts under the active version. If it's already
+ * on the current version, this is a no-op re-wrap (still safe to run).
+ */
+export async function reencryptCredential(stored: string): Promise<string> {
+  const plaintext = decryptCredential(stored);
+  return encryptCredential(plaintext);
 }

@@ -16,6 +16,7 @@ export const tenants = pgTable("tenants", {
   fullName: text("full_name").notNull(),
   phone: text("phone").notNull(), // used for STK Push
   email: text("email"),
+  whatsappPhone: text("whatsapp_phone"),
   nationalId: text("national_id"),
   agencyName: text("agency_name").notNull(),
   inviteToken: text("invite_token"),        // Secure random token for invite link

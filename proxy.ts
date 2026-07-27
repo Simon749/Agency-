@@ -29,6 +29,8 @@ const isTenantRoute = createRouteMatcher(['/tenant(.*)']);
 const isProtectedRoute = createRouteMatcher(['/super-admin(.*)', '/admin(.*)', '/tenant(.*)']);
 const isTenantDetailRoute = createRouteMatcher(['/admin/tenants/([^/]+)']);
 const isPublicRoute = createRouteMatcher(['/', '/sign-in(.*)', '/sign-up(.*)', '/pending-setup', '/suspended', '/deactivated']);
+const isMfaRoute = createRouteMatcher(['/mfa/setup', '/api/mfa/(.*)']);
+
 
 const ROLE_HOME: Record<string, string> = {
   SUPER_ADMIN: '/super-admin/dashboard',
@@ -175,6 +177,17 @@ export default clerkMiddleware(async (auth, req) => {
     } catch (err) {
       console.error('[MIDDLEWARE] Failed to fetch user from Clerk API:', err);
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE G: MFA ENFORCEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+  const requiresMfa = ['AGENCY_OWNER', 'SUPER_ADMIN'].includes(role ?? '');
+  const mfaEnabled = (sessionClaims?.mfa_enabled as boolean) ?? false;
+
+  if (requiresMfa && !mfaEnabled && !isMfaRoute(req)) {
+    console.warn(`[MFA] User ${userId} (${role}) blocked — MFA not enabled`);
+    return NextResponse.redirect(new URL('/mfa/setup', req.url));
   }
 
   // 5. Signed-in user on "/" → let app/page.tsx handle redirect server-side

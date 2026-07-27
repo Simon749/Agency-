@@ -57,3 +57,28 @@ npm run db:seed
 // route.ts — report what the orchestrator actually knows
 const summary = await runMonthlyBilling(targetMonth);
 
+
+Setting a custom Cache-Control header can break Next.js development behavior.
+○ Compiling proxy ...
+- Experiments (use with caution):
+  · optimizePackageImports
+  · serverActions
+
+Clerk - DEPRECATION WARNING: "createRouteMatcher" is deprecated and will be removed in the next major release.
+Use resource-based auth checks instead. Move auth checks into each page, layout, API route, or Server Function that accesses protected data. Middleware-based auth checks rely on path matching, which can diverge from how Next.js routes requests and leave protected resources reachable. For a migration guide, see: https://clerk.com/docs/guides/development/upgrading/upgrade-guides/migrate-from-create-route-matcher
+Attention: Clerk collects telemetry data from its SDKs when connected to development instances.
+The data collected is used to inform Clerk's product roadmap.
+To learn more, including how to opt-out from the telemetry program, visit: https://clerk.com/docs/telemetry.
+
+
+// before
+await sendSms({
+  to: building.landlordPhone,
+  message: keyRotationSuccessSms({ buildingName: building.name, rotatedAt: new Date().toISOString() }),
+});
+
+// after
+await sendSms(
+  building.landlordPhone,
+  keyRotationSuccessSms({ buildingName: building.name, rotatedAt: new Date().toISOString() })
+);

@@ -1,0 +1,74 @@
+import { sendSms } from "@/lib/sms/sendSms";
+import { sendTemplateMessage, type WhatsAppTemplateName } from "@/lib/whatsapp/templates";
+import { getDb } from "@/lib/db";
+import { notificationPreferences } from "@/db/schema/notificationPreferences";
+import { eq } from "drizzle-orm";
+
+export type NotificationChannel = "SMS" | "WHATSAPP";
+
+export interface DispatchParams {
+  userId: string;
+  agencyId: string;
+  phone: string;
+  message: string; // Fallback SMS text
+  templateName?: WhatsAppTemplateName;
+  templateParams?: Record<string, string>;
+  type: "PAYMENT" | "REMINDER" | "OVERDUE" | "LEASE" | "COMPLAINT" | "INVITE";
+}
+
+export async function dispatchNotification(
+  params: DispatchParams
+): Promise<{ channel: NotificationChannel; success: boolean; error?: string }> {
+  const db = getDb();
+  
+  // Fetch user preference
+  const [pref] = await db
+    .select()
+    .from(notificationPreferences)
+    .where(eq(notificationPreferences.userId, params.userId))
+    .limit(1);
+  
+  const primaryChannel = pref?.primaryChannel ?? "SMS";
+  const fallbackEnabled = pref?.fallbackToSms ?? true;
+  const whatsappPhone = pref?.whatsappPhone ?? params.phone;
+  
+  // Check if WhatsApp is preferred and available for this message type
+  const overrides = pref?.channelOverrides 
+    ? (JSON.parse(pref.channelOverrides) as Record<string, string>)
+    : {};
+    
+  const channelForType = overrides[params.type] ?? primaryChannel;
+  
+  if (channelForType === "WHATSAPP" && params.templateName) {
+    // Try WhatsApp
+    const result = await sendTemplateMessage(
+      whatsappPhone,
+      params.templateName,
+      params.templateParams as any
+    );
+    
+    if (result.success) {
+      return { channel: "WHATSAPP", success: true };
+    }
+    
+    // Fallback to SMS if enabled
+    if (fallbackEnabled) {
+      const smsResult = await sendSms(params.phone, params.message);
+      return { 
+        channel: "SMS", 
+        success: smsResult.success,
+        error: smsResult.error,
+      };
+    }
+    
+    return { channel: "WHATSAPP", success: false, error: result.error };
+  }
+  
+  // Default to SMS
+  const smsResult = await sendSms(params.phone, params.message);
+  return {
+    channel: "SMS",
+    success: smsResult.success,
+    error: smsResult.error,
+  };
+}

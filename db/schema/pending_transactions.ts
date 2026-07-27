@@ -18,6 +18,7 @@ export const pendingTransactions = pgTable("pending_transactions", {
   resultCode: text("result_code"),   // from Daraja callback
   resultDesc: text("result_desc"),
   mpesaCode: text("mpesa_code").unique(), // TransactionID on success
+  accountReference: text("account_reference").notNull(),
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

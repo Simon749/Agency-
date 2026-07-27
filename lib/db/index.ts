@@ -9,8 +9,9 @@ import ws from "ws";
 import * as schema from "@/db/schema";
 import * as relations from "@/db/relations";
 import { sql } from "drizzle-orm";
+import { usersMfa } from "@/db/schema/users-mfa";
 
-const fullSchema = { ...schema, ...relations };
+const fullSchema = { ...schema, ...relations, usersMfa };
 
 type DatabaseClient = ReturnType<typeof drizzle<typeof fullSchema>>;
 

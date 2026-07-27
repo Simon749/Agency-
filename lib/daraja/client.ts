@@ -16,6 +16,7 @@ import type {
   StkPushRequest,
   StkPushResponse,
 } from "./types";
+import { PaybillStrategy } from "../payments/paybill-strategy";
 
 const DARAJA_BASE_URL =
   process.env.DARAJA_ENV === "production"
@@ -68,6 +69,7 @@ export interface InitiateStkPushParams {
   accountReference?: string;
   transactionDesc?: string;
   callbackUrl: string;
+  strategy?: PaybillStrategy;
 }
 
 /**

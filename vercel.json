@@ -32,13 +32,27 @@
       "path": "/api/cron/backup-critical-data",
       "schedule": "0 3 * * *"
     },
-    { "path": "/api/cron/daily-audit-export", "schedule": "0 3 * * *" }
+    {
+      "path": "/api/cron/daily-audit-export",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/key-rotation-alert",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/stk-push-batcher",
+      "schedule": "*/1 * * * *"
+    }
   ],
   "functions": {
     "app/api/health/route.ts": {
       "maxDuration": 10
     },
     "app/api/cron/ledger-reconciliation/route.ts": {
+      "maxDuration": 30
+    },
+    "app/api/cron/key-rotation-alert/route.ts": {
       "maxDuration": 30
     }
   }

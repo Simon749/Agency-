@@ -168,7 +168,7 @@ export async function reconcileBuildingReport(
     const tenant = tenantMap.get(tx.BillRefNumber);
     if (!tenant && tx.BillRefNumber) {
       await insertDiscrepancy({
-        agency_Id: "",
+        agencyId: "",
         buildingId,
         discrepancyType: "TENANT_MISMATCH",
         darajaTransactionId: tx.TransID,
@@ -194,7 +194,7 @@ export async function reconcileBuildingReport(
   for (const entry of ledgerCredits) {
     if (entry.referenceCode && !matchedLedgerIds.has(entry.id)) {
       await insertDiscrepancy({
-        agency_Id: "",
+        agencyId: "",
         buildingId,
         discrepancyType: "DARAJA_MISSING",
         ledgerEntryId: entry.id,
