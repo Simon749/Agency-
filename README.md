@@ -71,14 +71,35 @@ The data collected is used to inform Clerk's product roadmap.
 To learn more, including how to opt-out from the telemetry program, visit: https://clerk.com/docs/telemetry.
 
 
-// before
-await sendSms({
-  to: building.landlordPhone,
-  message: keyRotationSuccessSms({ buildingName: building.name, rotatedAt: new Date().toISOString() }),
-});
+# 1. See both definitions side by side
+cat ./db/schema.ts | grep -A 20 'pgTable("buildings"'
+cat ./db/schema/buildings.ts
 
-// after
-await sendSms(
-  building.landlordPhone,
-  keyRotationSuccessSms({ buildingName: building.name, rotatedAt: new Date().toISOString() })
-);
+
+# 2. See which files import from which location
+grep -rn "from \"@/db/schema\"" --include="*.ts" --include="*.tsx" .
+grep -rn "from \"@/db/schema/" --include="*.ts" --include="*.tsx" .
+grep -rn "from \"@/lib/db/schema" --include="*.ts" --include="*.tsx" .
+
+
+export const agencies = pgTable("agencies", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  phone: text("phone").notNull(),
+  logoUrl: text("logo_url"),
+  isActive: boolean("is_active").default(true).notNull(),
+  subscriptionStatus: text("subscription_status").default("TRIAL"),
+
+  // ── Soft delete & termination ──────────────────────────────
+  deletedAt: timestamp("deleted_at"),
+  terminationReason: terminationReasonEnum("termination_reason"),
+  terminatedBy: text("terminated_by"),
+  dataExportedAt: timestamp("data_exported_at"),
+  gracePeriodEndsAt: timestamp("grace_period_ends_at"),
+
+  // ── Landlord payout config (Gap Closure Tracker Phase E) ──
+  defaultCommissionRate: numeric("default_commission_rate", { precision: 5, scale: 2 }).default("0.00"),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});

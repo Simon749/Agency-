@@ -7,7 +7,7 @@
 import { eq, and } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { buildings, buildingUtilities } from "@/db/schema";
-import { encrypt } from "@/lib/encryption"; // your existing encryption helper
+import { encryptCredential } from "@/lib/encryption"; // your existing encryption helper
 
 // ── 1. Update Daraja Credentials ─────────────────────────────────────────────
 
@@ -37,10 +37,10 @@ export async function updateDarajaCredentials(
   await db
     .update(buildings)
     .set({
-      darajaConsumerKey: data.consumerKey ? encrypt(data.consumerKey) : undefined,
-      darajaConsumerSecret: data.consumerSecret ? encrypt(data.consumerSecret) : undefined,
-      darajaShortcode: data.shortcode ? encrypt(data.shortcode) : undefined,
-      darajaPasskey: data.passkey ? encrypt(data.passkey) : undefined,
+      darajaConsumerKey: data.consumerKey ? encryptCredential(data.consumerKey) : undefined,
+      darajaConsumerSecret: data.consumerSecret ? encryptCredential(data.consumerSecret) : undefined,
+      darajaShortcode: data.shortcode ? encryptCredential(data.shortcode) : undefined,
+      darajaPasskey: data.passkey ? encryptCredential(data.passkey) : undefined,
     })
     .where(eq(buildings.id, buildingId));
 

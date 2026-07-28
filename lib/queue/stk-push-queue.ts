@@ -1,7 +1,7 @@
 import { eq, and, lte, asc } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { stkPushQueue } from "@/db/schema";
-import { checkRateLimit, getRateLimitKey, getRateLimitForEnv } from "@/lib/daraja/rate-limiter";
+import { stkPushQueue, pendingTransactions } from "@/db/schema";
+import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { canExecute, recordSuccess, recordFailure } from "@/lib/daraja/circuit-breaker";
 import { initiateStkPush } from "@/lib/daraja/client";
 import { getPaybillStrategy } from "@/lib/payments/paybill-strategy";
@@ -16,9 +16,11 @@ export interface EnqueueStkPushParams {
   transactionDesc?: string;
 }
 
-export async function enqueueStkPush(params: EnqueueStkPushParams): Promise<string> {
+export async function enqueueStkPush(
+  params: EnqueueStkPushParams
+): Promise<string> {
   const db = getDb();
-  
+
   const [item] = await db
     .insert(stkPushQueue)
     .values({
@@ -33,7 +35,7 @@ export async function enqueueStkPush(params: EnqueueStkPushParams): Promise<stri
       scheduledAt: new Date(),
     })
     .returning({ id: stkPushQueue.id });
-    
+
   return item.id;
 }
 
@@ -45,8 +47,8 @@ export async function processQueueBatch(batchSize: number = 10): Promise<{
 }> {
   const db = getDb();
   const now = new Date();
-  
-  // Fetch pending items that are scheduled for now or earlier
+
+  // Fetch pending items scheduled for now or earlier
   const items = await db
     .select()
     .from(stkPushQueue)
@@ -58,19 +60,19 @@ export async function processQueueBatch(batchSize: number = 10): Promise<{
     )
     .orderBy(asc(stkPushQueue.createdAt))
     .limit(batchSize);
-  
+
   let succeeded = 0;
   let failed = 0;
   let rateLimited = 0;
-  
+
   for (const item of items) {
-    // Determine which shortcode this will use
+    // Resolve shortcode for rate limiting
     let shortcode: string;
     try {
       const strategy = await getPaybillStrategy(item.buildingId, item.tenantId);
-      shortcode = strategy.type === "OWN" ? strategy.shortcode : strategy.shortcode;
+      shortcode =
+        strategy.type === "OWN" ? strategy.shortcode : strategy.shortcode;
     } catch {
-      // If strategy fails (e.g., no credentials), mark as failed
       await db
         .update(stkPushQueue)
         .set({
@@ -82,23 +84,28 @@ export async function processQueueBatch(batchSize: number = 10): Promise<{
       failed++;
       continue;
     }
-    
-    const rateLimitKey = getRateLimitKey(shortcode, "STK_PUSH");
-    const limits = getRateLimitForEnv("STK_PUSH");
-    const limitResult = checkRateLimit(rateLimitKey, limits.maxRequests, limits.windowMs);
-    
+
+    // Check Daraja rate limit (Redis-backed, per shortcode)
+    const limitResult = await checkRateLimit(
+      `daraja-stk-${shortcode}`,
+      RATE_LIMITS.darajaStkPerShortcode
+    );
+
     if (!limitResult.allowed) {
       rateLimited++;
-      // Reschedule for later
+      // Reschedule for later based on retryAfter
       await db
         .update(stkPushQueue)
         .set({
-          scheduledAt: new Date(Date.now() + limitResult.retryAfterMs + 1000),
+          scheduledAt: new Date(
+            Date.now() + (limitResult.retryAfter || 60) * 1000
+          ),
         })
         .where(eq(stkPushQueue.id, item.id));
       continue;
     }
-    
+
+    // Check circuit breaker
     const circuitKey = `daraja:stk:${shortcode}`;
     if (!canExecute(circuitKey)) {
       rateLimited++;
@@ -110,20 +117,24 @@ export async function processQueueBatch(batchSize: number = 10): Promise<{
         .where(eq(stkPushQueue.id, item.id));
       continue;
     }
-    
+
     try {
       // Mark as processing
       await db
         .update(stkPushQueue)
-        .set({ status: "PROCESSING", attemptCount: item.attemptCount + 1 })
+        .set({
+          status: "PROCESSING",
+          attemptCount: item.attemptCount + 1,
+        })
         .where(eq(stkPushQueue.id, item.id));
-      
-      // Get callback URL
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://propflow.co.ke";
+
+      // Build callback URL (must match your unified webhook route)
+      const baseUrl =
+        process.env.NEXT_PUBLIC_APP_URL ?? "https://propflow.co.ke";
       const callbackUrl = `${baseUrl}/api/webhooks/mpesa/${shortcode}`;
-      
+
       // Initiate STK Push
-      await initiateStkPush({
+      const response = await initiateStkPush({
         buildingId: item.buildingId,
         tenantId: item.tenantId,
         phone: item.phone,
@@ -132,31 +143,56 @@ export async function processQueueBatch(batchSize: number = 10): Promise<{
         transactionDesc: item.transactionDesc ?? undefined,
         callbackUrl,
       });
-      
-      recordSuccess(circuitKey);
-      succeeded++;
-      
-      // Note: We don't mark as COMPLETED here — the webhook callback will do that
-      // by linking to pendingTransactionId. For now, keep as PROCESSING.
-    } catch (err) {
-      recordFailure(circuitKey);
-      failed++;
-      
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      const shouldRetry = item.attemptCount + 1 < item.maxAttempts;
-      
+
+      // Link to pending_transactions so webhook can mark queue item complete
+      const [pendingTx] = await db
+        .insert(pendingTransactions)
+        .values({
+          tenantId: item.tenantId,
+          buildingId: item.buildingId,
+          agencyId: item.agencyId,
+          checkoutRequestId: response.CheckoutRequestID,
+          merchantRequestId: response.MerchantRequestID,
+          amount: item.amount,
+          phone: item.phone,
+          status: "PENDING",
+        })
+        .returning({ id: pendingTransactions.id });
+
       await db
         .update(stkPushQueue)
         .set({
-          status: shouldRetry ? "PENDING" : "FAILED",
-          errorMessage: errorMsg,
-          processedAt: new Date(),
-          scheduledAt: shouldRetry ? new Date(Date.now() + 60000 * (item.attemptCount + 1)) : null,
+          pendingTransactionId: pendingTx.id,
         })
+        .where(eq(stkPushQueue.id, item.id));
+
+      recordSuccess(circuitKey);
+      succeeded++;
+
+      // Note: queue item stays PROCESSING until webhook marks it COMPLETED
+    } catch (err) {
+      recordFailure(circuitKey);
+      failed++;
+
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      const shouldRetry = item.attemptCount + 1 < item.maxAttempts;
+
+      const updateData: Record<string, any> = {
+        status: shouldRetry ? "PENDING" : "FAILED",
+        errorMessage: errorMsg,
+        processedAt: new Date(),
+      };
+      if (shouldRetry) {
+        updateData.scheduledAt = new Date(Date.now() + 60000 * (item.attemptCount + 1));
+      }
+
+      await db
+        .update(stkPushQueue)
+        .set(updateData)
         .where(eq(stkPushQueue.id, item.id));
     }
   }
-  
+
   return {
     processed: items.length,
     succeeded,

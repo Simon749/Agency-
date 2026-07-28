@@ -7,6 +7,7 @@ export interface AggregatorResolution {
   buildingId: string;
   agencyId: string;
   isActive: boolean;
+  clerkUserId: string | null; // <-- nullable because aggregatorAccounts may not store it
 }
 
 export async function resolveAggregatorPayment(
@@ -14,40 +15,46 @@ export async function resolveAggregatorPayment(
   aggregatorShortcode: string
 ): Promise<AggregatorResolution | null> {
   const db = getDb();
-  
-  // First try exact match on accountReference (short code for manual paybill)
+
+  // 1. Exact match on short account reference (manual paybill)
   const [account] = await db
     .select()
     .from(aggregatorAccounts)
-    .where(
-      eq(aggregatorAccounts.accountReference, accountReference)
-    )
+    .where(eq(aggregatorAccounts.accountReference, accountReference))
     .limit(1);
 
   if (account && account.aggregatorShortcode === aggregatorShortcode) {
+    // Look up the tenant to get their clerkUserId
+    const [tenant] = await db
+      .select({ clerkUserId: tenants.clerkUserId })
+      .from(tenants)
+      .where(eq(tenants.id, account.tenantId))
+      .limit(1);
+
     return {
       tenantId: account.tenantId,
       buildingId: account.buildingId,
       agencyId: account.agencyId,
       isActive: account.isActive,
+      clerkUserId: tenant?.clerkUserId ?? null,
     };
   }
 
-  // Fallback: try matching by tenantId (for STK Push where tenantId is used directly)
-  // This handles cases where AccountReference = tenantId
+  // 2. Fallback: match by tenantId (STK Push where tenantId is used directly)
   const [tenant] = await db
     .select({
       id: tenants.id,
       buildingId: tenants.buildingId,
       agencyId: tenants.agencyId,
       status: tenants.status,
+      clerkUserId: tenants.clerkUserId,
     })
     .from(tenants)
     .where(eq(tenants.id, accountReference))
     .limit(1);
 
   if (tenant) {
-    // Verify the building uses this aggregator shortcode
+    // Verify the building does NOT have its own shortcode
     const [building] = await db
       .select({
         agencyId: buildings.agencyId,
@@ -57,7 +64,7 @@ export async function resolveAggregatorPayment(
       .where(eq(buildings.id, tenant.buildingId))
       .limit(1);
 
-    // If building has its own shortcode, this shouldn't hit aggregator
+    // If building has its own shortcode, this payment should not hit aggregator
     if (building?.darajaShortcode) {
       return null;
     }
@@ -67,6 +74,7 @@ export async function resolveAggregatorPayment(
       buildingId: tenant.buildingId,
       agencyId: tenant.agencyId,
       isActive: tenant.status !== "VACATED",
+      clerkUserId: tenant.clerkUserId,
     };
   }
 

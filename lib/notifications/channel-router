@@ -1,70 +1,103 @@
-import { sendSms } from "@/lib/sms/sendSms";
-import { sendTemplateMessage, type WhatsAppTemplateName } from "@/lib/whatsapp/templates";
-import { getDb } from "@/lib/db";
-import { notificationPreferences } from "@/db/schema/notificationPreferences";
+// lib/notifications/channel-router.ts
+// Routes outbound notifications through the agency's preferred channel,
+// respecting per-event toggles from notification_preferences.
+// Backs the /admin/settings/notifications page and all webhook/cron callers.
+
 import { eq } from "drizzle-orm";
+import { getDb } from "../../lib/db";
+import { notificationPreferences } from "../../db/schema";
+import { sendSms } from "../../lib/sms/sendSms";
+
+export type NotificationType =
+  | "PAYMENT"
+  | "REMINDER"
+  | "OVERDUE"
+  | "LEASE"
+  | "COMPLAINT_FILED"
+  | "COMPLAINT_RESOLVED"
+  | "INVITE";
 
 export type NotificationChannel = "SMS" | "WHATSAPP";
 
 export interface DispatchParams {
-  userId: string;
+  userId: string; // Clerk user ID of the RECIPIENT (not a tenant DB uuid — see note below)
   agencyId: string;
   phone: string;
-  message: string; // Fallback SMS text
-  templateName?: WhatsAppTemplateName;
-  templateParams?: Record<string, string>;
-  type: "PAYMENT" | "REMINDER" | "OVERDUE" | "LEASE" | "COMPLAINT" | "INVITE";
+  message: string;
+  templateName?: string;
+  templateParams?: Record<string, string | number>;
+  type: NotificationType;
 }
 
+export interface DispatchResult {
+  channel: NotificationChannel;
+  success: boolean;
+  skipped?: boolean;
+  reason?: string;
+  error?: string;
+}
+
+// Maps each event type to the toggle column that gates it.
+const TYPE_TO_PREFERENCE_KEY: Record<NotificationType, keyof typeof notificationPreferences.$inferSelect> = {
+  PAYMENT: "notifyPaymentReceived",
+  REMINDER: "notifyRentReminder",
+  OVERDUE: "notifyOverdue",
+  LEASE: "notifyLeaseRenewal",
+  COMPLAINT_FILED: "notifyComplaintFiled",
+  COMPLAINT_RESOLVED: "notifyComplaintResolved",
+  INVITE: "notifyInviteSent",
+};
+
+/**
+ * Dispatch a notification through the agency's configured channel.
+ *
+ * Looks up preferences by agencyId (agency-level settings — see schema note).
+ * If no preference row exists yet, defaults to SMS with all events enabled,
+ * matching the column defaults in notification_preferences.
+ */
 export async function dispatchNotification(
   params: DispatchParams
-): Promise<{ channel: NotificationChannel; success: boolean; error?: string }> {
+): Promise<DispatchResult> {
   const db = getDb();
-  
-  // Fetch user preference
-  const [pref] = await db
+
+  const [prefs] = await db
     .select()
     .from(notificationPreferences)
-    .where(eq(notificationPreferences.userId, params.userId))
+    .where(eq(notificationPreferences.agencyId, params.agencyId))
     .limit(1);
-  
-  const primaryChannel = pref?.primaryChannel ?? "SMS";
-  const fallbackEnabled = pref?.fallbackToSms ?? true;
-  const whatsappPhone = pref?.whatsappPhone ?? params.phone;
-  
-  // Check if WhatsApp is preferred and available for this message type
-  const overrides = pref?.channelOverrides 
-    ? (JSON.parse(pref.channelOverrides) as Record<string, string>)
-    : {};
-    
-  const channelForType = overrides[params.type] ?? primaryChannel;
-  
-  if (channelForType === "WHATSAPP" && params.templateName) {
-    // Try WhatsApp
-    const result = await sendTemplateMessage(
-      whatsappPhone,
-      params.templateName,
-      params.templateParams as any
-    );
-    
-    if (result.success) {
-      return { channel: "WHATSAPP", success: true };
-    }
-    
-    // Fallback to SMS if enabled
-    if (fallbackEnabled) {
-      const smsResult = await sendSms(params.phone, params.message);
-      return { 
-        channel: "SMS", 
-        success: smsResult.success,
-        error: smsResult.error,
-      };
-    }
-    
-    return { channel: "WHATSAPP", success: false, error: result.error };
+
+  // No row yet — fall back to the same defaults the DB columns would give,
+  // so behavior is identical whether or not the agency has visited the
+  // notifications settings page.
+  const preferredChannel = prefs?.preferredChannel ?? "SMS";
+  const fallbackToSms = prefs?.fallbackToSms ?? true;
+  const eventEnabled =
+    prefs === undefined ? true : Boolean(prefs[TYPE_TO_PREFERENCE_KEY[params.type]]);
+
+  if (!eventEnabled) {
+    return {
+      channel: "SMS",
+      success: true,
+      skipped: true,
+      reason: `Agency has disabled notifications for event type: ${params.type}`,
+    };
   }
-  
-  // Default to SMS
+
+  // WhatsApp isn't live yet (Gap Closure Tracker Phase H). Route everything
+  // to SMS today, but keep the branch so the swap-in later is a one-line change.
+  if (preferredChannel === "WHATSAPP") {
+    // TODO(Phase H): call the WhatsApp Business API here once integrated.
+    // For now, always fall back to SMS regardless of fallbackToSms, since
+    // there is no WhatsApp path to attempt yet.
+    const smsResult = await sendSms(params.phone, params.message);
+    return {
+      channel: "SMS",
+      success: smsResult.success,
+      error: smsResult.error,
+      reason: fallbackToSms ? "WhatsApp not yet integrated — used SMS fallback" : undefined,
+    };
+  }
+
   const smsResult = await sendSms(params.phone, params.message);
   return {
     channel: "SMS",

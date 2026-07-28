@@ -114,7 +114,7 @@ export async function reconcileBuildingReport(
         buildingId,
         discrepancyType: "LEDGER_MISSING",
         darajaTransactionId: tx.TransID,
-        darajaAmount: parseFloat(tx.TransAmount),
+        darajaAmount: String(parseFloat(tx.TransAmount)),
         darajaPhone: tx.MSISDN,
         darajaTimestamp: tx.TransTime,
         reportDate,
@@ -144,10 +144,10 @@ export async function reconcileBuildingReport(
         buildingId,
         discrepancyType: "AMOUNT_MISMATCH",
         darajaTransactionId: tx.TransID,
-        darajaAmount: darajaAmount,
+        darajaAmount: String(darajaAmount),
         ledgerEntryId: ledgerEntry.id,
         ledgerReferenceCode: ledgerEntry.referenceCode,
-        ledgerAmount: ledgerAmount,
+        ledgerAmount: String(ledgerAmount),
         ledgerTenantId: ledgerEntry.tenantId,
         reportDate,
         reason: `Amount mismatch: Daraja shows KES ${darajaAmount}, ledger shows KES ${ledgerAmount}`,
@@ -172,7 +172,7 @@ export async function reconcileBuildingReport(
         buildingId,
         discrepancyType: "TENANT_MISMATCH",
         darajaTransactionId: tx.TransID,
-        darajaAmount: darajaAmount,
+        darajaAmount: String(darajaAmount),
         reportDate,
         reason: `BillRefNumber ${tx.BillRefNumber} does not match any tenant in this building`,
       });
@@ -199,7 +199,7 @@ export async function reconcileBuildingReport(
         discrepancyType: "DARAJA_MISSING",
         ledgerEntryId: entry.id,
         ledgerReferenceCode: entry.referenceCode,
-        ledgerAmount: parseFloat(String(entry.amount)),
+        ledgerAmount: String(parseFloat(String(entry.amount))),
         ledgerTenantId: entry.tenantId,
         reportDate,
         reason: `Ledger CREDIT ${entry.referenceCode} for KES ${entry.amount} not found in Daraja settlement`,
@@ -246,7 +246,7 @@ export async function reconcileBuildingReport(
  * Insert a discrepancy record. Fills agencyId from building lookup.
  */
 async function insertDiscrepancy(
-  data: Omit<InsertReconciliationDiscrepancy, "id" | "agencyId" | "createdAt">
+  data: Omit<InsertReconciliationDiscrepancy, "id" | "createdAt">
 ): Promise<void> {
   const db = getDb();
 

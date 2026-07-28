@@ -2,16 +2,28 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { buildings, aggregatorAccounts } from "@/db/schema";
 
-export type PaybillStrategy = 
-  | { type: "OWN"; buildingId: string; shortcode: string; passkey: string; consumerKey: string; consumerSecret: string }
-  | { type: "AGGREGATOR"; aggregatorAccountId: string; accountReference: string; shortcode: string };
+export type PaybillStrategy =
+  | {
+      type: "OWN";
+      buildingId: string;
+      shortcode: string;
+      passkey: string;
+      consumerKey: string;
+      consumerSecret: string;
+    }
+  | {
+      type: "AGGREGATOR";
+      aggregatorAccountId: string;
+      accountReference: string;
+      shortcode: string;
+    };
 
 export async function getPaybillStrategy(
   buildingId: string,
   tenantId: string
 ): Promise<PaybillStrategy> {
   const db = getDb();
-  
+
   const [building] = await db
     .select({
       id: buildings.id,
@@ -30,7 +42,12 @@ export async function getPaybillStrategy(
   }
 
   // If building has its own Daraja credentials, use them
-  if (building.darajaShortcode && building.darajaPasskey && building.darajaConsumerKey && building.darajaConsumerSecret) {
+  if (
+    building.darajaShortcode &&
+    building.darajaPasskey &&
+    building.darajaConsumerKey &&
+    building.darajaConsumerSecret
+  ) {
     return {
       type: "OWN",
       buildingId: building.id,
@@ -49,7 +66,9 @@ export async function getPaybillStrategy(
     .limit(1);
 
   if (!account) {
-    throw new Error(`No aggregator account found for tenant ${tenantId}. Please contact support.`);
+    throw new Error(
+      `No aggregator account found for tenant ${tenantId}. Please contact support.`
+    );
   }
 
   return {

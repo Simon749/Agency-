@@ -1,4 +1,3 @@
-// app/tenant/pay/actions.ts
 "use server";
 
 import { eq } from "drizzle-orm";
@@ -9,13 +8,15 @@ import { initiateStkPush } from "@/lib/daraja/client";
 import { formatPhoneForDaraja } from "@/lib/daraja/utils";
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
-import { checkActionRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { checkActionRateLimit, checkRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { headers } from "next/headers";
+import { enqueueStkPush } from "@/lib/queue/stk-push-queue";
+import { getPaybillStrategy } from "@/lib/payments/paybill-strategy";
 
 interface InitiatePaymentInput {
   tenantId: string;
   buildingId: string;
-  agencyId: string;   // Required for getTenantBalance (agency-scoped)
+  agencyId: string;
   phone: string;
   amount: number;
   unitNumber: string;
@@ -62,6 +63,30 @@ export async function initiatePayment(input: InitiatePaymentInput) {
   );
   if (!ipLimit.allowed) {
     return { success: false, error: "Too many requests. Please try again later." };
+  }
+
+  // ── Rate Limit: per Daraja shortcode ──
+  const strategy = await getPaybillStrategy(input.buildingId, input.tenantId);
+  const rateLimit = await checkRateLimit(
+    `daraja-stk-${strategy.shortcode}`,
+    RATE_LIMITS.darajaStkPerShortcode
+  );
+  if (!rateLimit.allowed) {
+    const queueId = await enqueueStkPush({
+      tenantId: input.tenantId,
+      buildingId: input.buildingId,
+      agencyId: input.agencyId,
+      amount: input.amount,
+      phone: input.phone,
+      accountReference: input.tenantId,
+      transactionDesc: `Rent ${new Date().toISOString().slice(0, 7)} - Unit ${input.unitNumber}`,
+    });
+    return {
+      success: true,
+      queued: true,
+      message: "High traffic. You'll receive the M-Pesa prompt shortly.",
+      queueId,
+    };
   }
 
   const db = getDb();

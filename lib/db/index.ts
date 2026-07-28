@@ -32,6 +32,7 @@ neonConfig.webSocketConstructor = ws;
 
 const globalForDb = globalThis as unknown as DatabaseGlobals;
 
+
 export function getDb(): DatabaseClient {
   if (!globalForDb.db) {
     const databaseUrl: string | undefined = process.env.DATABASE_URL;
@@ -87,6 +88,7 @@ export async function checkDbHealth(): Promise<{
 }
 
 export { schema, relations, fullSchema };
+
 
 export type {
   Agency, InsertAgency,

@@ -46,6 +46,7 @@ export const RATE_LIMITS = {
   agencyApi: { windowMs: 60_000, maxRequests: 1000, keyPrefix: "rl:agency:api" } as RateLimitConfig,
   agencyBurst: { windowMs: 60_000, maxRequests: 200, keyPrefix: "rl:agency:burst" } as RateLimitConfig,
   clerkWebhook: { windowMs: 60_000, maxRequests: 30, keyPrefix: "rl:clerk" } as RateLimitConfig,
+  darajaStkPerShortcode: { windowMs: 60_000, maxRequests: 300, keyPrefix: "rl:daraja:stk" } as RateLimitConfig,
   cron: { windowMs: 60_000, maxRequests: 5, keyPrefix: "rl:cron" } as RateLimitConfig,
 } as const;
 
@@ -138,13 +139,15 @@ export async function rateLimitMiddleware(req: NextRequest, config: MiddlewareCo
       if (!agencyResult.allowed) {
         return NextResponse.json(
           { error: config.customMessage ?? "Agency rate limit exceeded", retryAfter: agencyResult.retryAfter, scope: "agency", agencyId },
-          { status: 429, headers: {
-            "X-RateLimit-Limit": String(agencyResult.limit),
-            "X-RateLimit-Remaining": String(agencyResult.remaining),
-            "X-RateLimit-Reset": String(agencyResult.resetTime),
-            "Retry-After": String(agencyResult.retryAfter),
-            "X-RateLimit-Scope": "agency",
-          }}
+          {
+            status: 429, headers: {
+              "X-RateLimit-Limit": String(agencyResult.limit),
+              "X-RateLimit-Remaining": String(agencyResult.remaining),
+              "X-RateLimit-Reset": String(agencyResult.resetTime),
+              "Retry-After": String(agencyResult.retryAfter),
+              "X-RateLimit-Scope": "agency",
+            }
+          }
         );
       }
     }
@@ -154,12 +157,14 @@ export async function rateLimitMiddleware(req: NextRequest, config: MiddlewareCo
   if (!result.allowed) {
     return NextResponse.json(
       { error: config.customMessage ?? "Rate limit exceeded", retryAfter: result.retryAfter },
-      { status: 429, headers: {
-        "X-RateLimit-Limit": String(result.limit),
-        "X-RateLimit-Remaining": String(result.remaining),
-        "X-RateLimit-Reset": String(result.resetTime),
-        "Retry-After": String(result.retryAfter),
-      }}
+      {
+        status: 429, headers: {
+          "X-RateLimit-Limit": String(result.limit),
+          "X-RateLimit-Remaining": String(result.remaining),
+          "X-RateLimit-Reset": String(result.resetTime),
+          "Retry-After": String(result.retryAfter),
+        }
+      }
     );
   }
   return null;

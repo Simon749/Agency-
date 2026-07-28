@@ -5,7 +5,7 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { buildings } from "@/db/schema";
-import { decrypt } from "@/lib/encryption";
+import { decryptCredential } from "@/lib/encryption";
 import { getAccessToken } from "./client";
 
 const DARAJA_BASE_URL =
@@ -70,7 +70,7 @@ export async function fetchBuildingTransactions(
     throw new Error(`No Daraja shortcode configured for building ${buildingId}`);
   }
 
-  const shortcode = decrypt(building.shortcode);
+  const shortcode = decryptCredential(building.shortcode);
   const accessToken = await getAccessToken(buildingId);
 
   // Default to yesterday if no date range provided

@@ -19,8 +19,8 @@ interface DiscrepancyRow {
   ledgerReferenceCode: string | null;
   ledgerAmount: number | null;
   tenantName: string | null;
-  reportDate: string;
-  status: string;
+  reportDate: string | null;
+  status: string | null;
   resolvedAt: Date | null;
   resolvedBy: string | null;
   resolutionNotes: string | null;
@@ -67,10 +67,10 @@ async function getDiscrepancies(agencyId: string): Promise<DiscrepancyRow[]> {
       ledgerAmount: row.ledgerAmount ? Number(row.ledgerAmount) : null,
       tenantName,
       reportDate: row.reportDate,
-      status: row.status,
+      status: row.status ?? "UNRESOLVED",
       resolvedAt: row.resolvedAt,
       resolvedBy: row.resolvedBy,
-      resolutionNotes: row.resolutionNotes,
+      resolutionNotes: (row as any).resolutionNotes ?? null,
       createdAt: row.createdAt,
       reason: row.reason,
     });
@@ -125,7 +125,7 @@ export default async function ReconciliationPage({
   const filtered =
     filter === "all"
       ? allDiscrepancies
-      : allDiscrepancies.filter((d) => d.status.toLowerCase() === filter.toLowerCase());
+      : allDiscrepancies.filter((d) => d.status?.toLowerCase() === filter.toLowerCase());
 
   return (
     <div style={{ maxWidth: "1200px" }}>
@@ -364,12 +364,12 @@ function DiscrepancyCard({
             fontSize: "11px",
             textTransform: "uppercase",
             letterSpacing: "0.12em",
-            color: statusColors[d.status] ?? "rgba(255,255,255,0.5)",
+            color: statusColors[d.status ?? "UNRESOLVED"] ?? "rgba(255,255,255,0.5)",
             padding: "4px 10px",
-            border: `1px solid ${statusColors[d.status] ?? "rgba(255,255,255,0.15)"}`,
+            border: `1px solid ${statusColors[d.status ?? "UNRESOLVED"] ?? "rgba(255,255,255,0.15)"}`,
           }}
         >
-          {d.status}
+          {d.status ?? "UNRESOLVED"}
         </span>
       </div>
 
@@ -521,7 +521,7 @@ function DiscrepancyCard({
                   status: "FALSE_POSITIVE",
                   resolvedAt: new Date(),
                   resolvedBy: userId,
-                  resolutionNotes: "Marked as false positive — expected mismatch",
+                  notes: "Marked as false positive — expected mismatch",
                 })
                 .where(eq(reconciliationDiscrepancies.id, d.id));
 
@@ -572,11 +572,11 @@ function DiscrepancyCard({
             await db
               .update(reconciliationDiscrepancies)
               .set({
-                status: "RESOLVED",
+                status: "FALSE_POSITIVE",
                 resolvedAt: new Date(),
                 resolvedBy: userId,
-                resolutionNotes: "Investigation complete — discrepancy resolved",
-              })
+                resolutionNotes: "Marked as false positive — expected mismatch",
+              } as any) // <-- temporary cast until schema is migrated
               .where(eq(reconciliationDiscrepancies.id, d.id));
 
             await logAuditEvent({

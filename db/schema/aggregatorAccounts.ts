@@ -26,3 +26,4 @@ export const aggregatorAccounts = pgTable("aggregator_accounts", {
 
 export type AggregatorAccount = typeof aggregatorAccounts.$inferSelect;
 export type InsertAggregatorAccount = typeof aggregatorAccounts.$inferInsert;
+

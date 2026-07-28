@@ -24,11 +24,12 @@ export * from "./ledgerAllocations";
 export * from "./balanceSnapshots";
 export * from "./reconciliation_discrepancies";
 export * from "./billing_runs";
-export { staff } from "./staff";
 export * from "./aggregatorAccounts";
 export * from "./notificationPreferences";
 export * from "./stkPushQueue";
+export { staff } from "./staff";
 export type { Staff, InsertStaff } from "./staff";
 export type { ReconciliationDiscrepancy, InsertReconciliationDiscrepancy } from "./reconciliation_discrepancies";
 export type { AuditLogEntry, InsertAuditLogEntry } from "./audit_log";  // ← PHASE B: NEW
 export type { BillingRun, InsertBillingRun } from "./billing_runs";
+export type { AggregatorAccount, InsertAggregatorAccount } from "./aggregatorAccounts";

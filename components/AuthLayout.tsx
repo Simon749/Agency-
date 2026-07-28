@@ -25,9 +25,9 @@ import {
 import { useIsMobile } from "@/app/hooks/use-mobile";
 import { LayoutDashboard, LogOut, PanelLeft, Users } from "lucide-react";
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router";
 import { AuthLayoutSkeleton } from "./AuthLayoutSkeleton";
 import { Button } from "./ui/button";
+import { usePathname,useRouter } from "next/navigation";
 
 const menuItems = [
   { icon: LayoutDashboard, label: "Page 1", path: "/" },
@@ -110,8 +110,8 @@ function AuthLayoutContent({
   setSidebarWidth,
 }: AuthLayoutContentProps) {
   const { user, logout } = useAuth();
-  const location = useLocation();
-  const navigate = useNavigate();
+  const pathname = usePathname();
+  const router = useRouter();
   const { state, toggleSidebar } = useSidebar();
   const isCollapsed = state === "collapsed";
   const [isResizing, setIsResizing] = useState(false);
@@ -190,7 +190,7 @@ function AuthLayoutContent({
                   <SidebarMenuItem key={item.path}>
                     <SidebarMenuButton
                       isActive={isActive}
-                      onClick={() => navigate(item.path)}
+                      onClick={() => router.push(item.path)}
                       tooltip={item.label}
                       className={`h-10 transition-all font-normal`}
                     >

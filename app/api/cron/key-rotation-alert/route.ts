@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db/schema";
+import { getDb } from "@/lib/db"; // was: import { db } from "@/lib/db";
 import { buildings, agencies } from "@/db/schema";
 import { eq, and, isNotNull } from "drizzle-orm";
 import { sendSms } from "@/lib/sms/sendSms";
@@ -10,6 +10,7 @@ const WARNING_7_DAYS = 7;
 const WARNING_1_DAY = 1;
 
 export async function GET(req: NextRequest) {
+  const db = getDb();
   const authHeader = req.headers.get("authorization");
   const expectedSecret = process.env.CRON_SECRET;
 

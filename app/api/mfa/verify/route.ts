@@ -1,11 +1,12 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { verify } from "otplib";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db"; // was: import { db } from "@/lib/db";
 import { usersMfa } from "@/db/schema/users-mfa";
 import { eq } from "drizzle-orm";
 
 export async function POST(req: NextRequest) {
+  const db = getDb();
   try {
     const { userId } = await auth();
     if (!userId) {

@@ -1,7 +1,15 @@
 // lib/sms/triggers.ts
-// SMS trigger orchestration — fetches data, formats messages, sends SMS.
-// All functions are safe to call from Server Actions, API routes, and cron jobs.
-// They gracefully degrade if AT credentials are missing or tenant has no phone.
+// SMS trigger orchestration — fetches data, formats messages, routes through
+// dispatchNotification (agency preference gate), which calls sendSms.
+//
+// Preference-gated (respect /admin/settings/notifications toggles):
+//   payment received, rent reminder, overdue, lease renewal,
+//   complaint filed, complaint resolved, invite sent.
+//
+// NOT gated (no toggle exists — financial/critical, always sent):
+//   payment failed, refund confirmation.
+//   If you want these gated too, add notifyPaymentFailed / notifyRefund
+//   columns to notification_preferences and switch these two to dispatchNotification.
 
 import { eq, and, gte, lte, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
@@ -11,13 +19,14 @@ import {
   units,
   leases,
   tenantLedger,
-  pendingTransactions,
   complaints,
+  staff,
 } from "@/db/schema";
 import { sendSms } from "./sendSms";
+import { dispatchNotification, type NotificationType } from "@/lib/notifications/channel-router";
 import * as templates from "./templates";
 
-// ── Helper: safely send SMS and log result ─────────────────────────────────
+// ── Helper: ungated direct send (payment failed, refunds) ─────────────────
 
 async function safeSend(phone: string | null, message: string): Promise<boolean> {
   if (!phone) {
@@ -31,7 +40,39 @@ async function safeSend(phone: string | null, message: string): Promise<boolean>
   return result.success;
 }
 
-// ── 1. Payment Received (from Daraja callback) ─────────────────────────────
+// ── Helper: preference-gated send via channel-router ───────────────────────
+
+async function routedSend(params: {
+  userId: string | null;
+  agencyId: string;
+  phone: string | null;
+  message: string;
+  type: NotificationType;
+}): Promise<{ success: boolean; skipped: boolean }> {
+  if (!params.phone) {
+    console.warn("[SMS] No phone number — skipping send");
+    return { success: false, skipped: true };
+  }
+
+  const result = await dispatchNotification({
+    userId: params.userId ?? "", // clerkUserId when known; router doesn't use it today
+    agencyId: params.agencyId,
+    phone: params.phone,
+    message: params.message,
+    type: params.type,
+  });
+
+  if (result.skipped) {
+    console.log(`[SMS] Skipped (${params.type}): ${result.reason}`);
+    return { success: false, skipped: true };
+  }
+  if (!result.success) {
+    console.error(`[SMS] Failed to send to ${params.phone}:`, result.error);
+  }
+  return { success: result.success, skipped: false };
+}
+
+// ── 1. Payment Received (from Daraja callback) — GATED ─────────────────────
 
 export async function sendPaymentReceivedSms(
   tenantId: string,
@@ -45,6 +86,8 @@ export async function sendPaymentReceivedSms(
       fullName: tenants.fullName,
       phone: tenants.phone,
       buildingId: tenants.buildingId,
+      agencyId: tenants.agencyId,
+      clerkUserId: tenants.clerkUserId,
     })
     .from(tenants)
     .where(eq(tenants.id, tenantId));
@@ -69,10 +112,17 @@ export async function sendPaymentReceivedSms(
     buildingName,
   });
 
-  return safeSend(tenant.phone, message);
+  const { success } = await routedSend({
+    userId: tenant.clerkUserId,
+    agencyId: tenant.agencyId,
+    phone: tenant.phone,
+    message,
+    type: "PAYMENT",
+  });
+  return success;
 }
 
-// ── 2. Payment Failed (from Daraja callback) ─────────────────────────────────
+// ── 2. Payment Failed (from Daraja callback) — NOT GATED ───────────────────
 
 export async function sendPaymentFailedSms(
   tenantId: string,
@@ -96,7 +146,7 @@ export async function sendPaymentFailedSms(
   return safeSend(tenant.phone, message);
 }
 
-// ── 3. Rent Due in 7 Days (daily cron) ─────────────────────────────────────
+// ── 3. Rent Due in 7 Days (daily cron) — GATED ──────────────────────────────
 
 export async function sendRentDueReminders(targetDate?: string): Promise<{
   sent: number;
@@ -107,20 +157,15 @@ export async function sendRentDueReminders(targetDate?: string): Promise<{
   const today = targetDate ? new Date(targetDate) : new Date();
   const dueDate = new Date(today);
   dueDate.setDate(dueDate.getDate() + 7);
-  const dueDateStr = dueDate.toISOString().slice(0, 10); // YYYY-MM-DD
+  const dueDateStr = dueDate.toISOString().slice(0, 10);
 
-  // Find tenants whose lease start day is 7 days from now (simplified: bill on 1st)
-  // For PropFlow, rent is typically due on the 1st of each month.
-  // We send reminders on the 24th of the previous month.
-  const isFirstOfMonth = today.getDate() === 1;
-  const billingMonth = today.toISOString().slice(0, 7);
-
-  // Fetch active tenants with their building + unit + current rent
   const rows = await db
     .select({
       tenantId: tenants.id,
       fullName: tenants.fullName,
       phone: tenants.phone,
+      agencyId: tenants.agencyId,
+      clerkUserId: tenants.clerkUserId,
       buildingName: buildings.name,
       unitNumber: units.unitNumber,
       rentAmount: units.rentAmount,
@@ -140,11 +185,6 @@ export async function sendRentDueReminders(targetDate?: string): Promise<{
   let skipped = 0;
 
   for (const row of rows) {
-    if (!row.phone) {
-      skipped++;
-      continue;
-    }
-
     const message = templates.rentDueReminderSms({
       tenantName: row.fullName,
       amount: row.rentAmount,
@@ -153,15 +193,24 @@ export async function sendRentDueReminders(targetDate?: string): Promise<{
       dueDate: dueDateStr,
     });
 
-    const ok = await safeSend(row.phone, message);
-    ok ? sent++ : failed++;
+    const result = await routedSend({
+      userId: row.clerkUserId,
+      agencyId: row.agencyId,
+      phone: row.phone,
+      message,
+      type: "REMINDER",
+    });
+
+    if (result.skipped) skipped++;
+    else if (result.success) sent++;
+    else failed++;
   }
 
   console.log(`[SMS] Rent due reminders: ${sent} sent, ${failed} failed, ${skipped} skipped (due: ${dueDateStr})`);
   return { sent, failed, skipped };
 }
 
-// ── 4. Rent Overdue by 3+ Days (daily cron) ─────────────────────────────────
+// ── 4. Rent Overdue by 3+ Days (daily cron) — GATED ─────────────────────────
 
 export async function sendOverdueReminders(targetDate?: string): Promise<{
   sent: number;
@@ -170,15 +219,14 @@ export async function sendOverdueReminders(targetDate?: string): Promise<{
 }> {
   const db = getDb();
   const today = targetDate ? new Date(targetDate) : new Date();
-  const billingMonth = today.toISOString().slice(0, 7);
 
-  // Find all active tenants with a positive balance (owe money)
-  // We calculate balance per tenant by summing debits - credits
   const balanceRows = await db
     .select({
       tenantId: tenants.id,
       fullName: tenants.fullName,
       phone: tenants.phone,
+      agencyId: tenants.agencyId,
+      clerkUserId: tenants.clerkUserId,
       buildingName: buildings.name,
       unitNumber: units.unitNumber,
       totalDebit: sql<number>`COALESCE(SUM(CASE WHEN ${tenantLedger.type} = 'DEBIT' THEN ${tenantLedger.amount}::numeric ELSE 0 END), 0)`,
@@ -194,7 +242,15 @@ export async function sendOverdueReminders(targetDate?: string): Promise<{
         eq(tenants.inviteStatus, "ACCEPTED")
       )
     )
-    .groupBy(tenants.id, tenants.fullName, tenants.phone, buildings.name, units.unitNumber);
+    .groupBy(
+      tenants.id,
+      tenants.fullName,
+      tenants.phone,
+      tenants.agencyId,
+      tenants.clerkUserId,
+      buildings.name,
+      units.unitNumber
+    );
 
   let sent = 0;
   let failed = 0;
@@ -203,15 +259,10 @@ export async function sendOverdueReminders(targetDate?: string): Promise<{
   for (const row of balanceRows) {
     const balance = Number(row.totalDebit) - Number(row.totalCredit);
     if (balance <= 0) {
-      skipped++; // no arrears
-      continue;
-    }
-    if (!row.phone) {
       skipped++;
       continue;
     }
 
-    // Calculate days overdue (simplified: if balance > 0 and we're past the 3rd)
     const daysOverdue = Math.max(3, today.getDate() - 3);
 
     const message = templates.rentOverdueSms({
@@ -222,15 +273,24 @@ export async function sendOverdueReminders(targetDate?: string): Promise<{
       unitNumber: row.unitNumber,
     });
 
-    const ok = await safeSend(row.phone, message);
-    ok ? sent++ : failed++;
+    const result = await routedSend({
+      userId: row.clerkUserId,
+      agencyId: row.agencyId,
+      phone: row.phone,
+      message,
+      type: "OVERDUE",
+    });
+
+    if (result.skipped) skipped++;
+    else if (result.success) sent++;
+    else failed++;
   }
 
   console.log(`[SMS] Overdue reminders: ${sent} sent, ${failed} failed, ${skipped} skipped`);
   return { sent, failed, skipped };
 }
 
-// ── 5. Lease Renewal — 60 Days Out (monthly cron) ────────────────────────────
+// ── 5. Lease Renewal — 60 Days Out (monthly cron) — GATED ──────────────────
 
 export async function sendLeaseRenewalReminders(targetDate?: string): Promise<{
   sent: number;
@@ -241,14 +301,15 @@ export async function sendLeaseRenewalReminders(targetDate?: string): Promise<{
   const today = targetDate ? new Date(targetDate) : new Date();
   const sixtyDaysOut = new Date(today);
   sixtyDaysOut.setDate(sixtyDaysOut.getDate() + 60);
-  const targetDateStr = sixtyDaysOut.toISOString().slice(0, 10); // YYYY-MM-DD
+  const targetDateStr = sixtyDaysOut.toISOString().slice(0, 10);
 
-  // Find leases ending in ~60 days that haven't had a reminder sent yet
   const rows = await db
     .select({
       tenantId: tenants.id,
       fullName: tenants.fullName,
       phone: tenants.phone,
+      agencyId: tenants.agencyId,
+      clerkUserId: tenants.clerkUserId,
       buildingName: buildings.name,
       unitNumber: units.unitNumber,
       leaseId: leases.id,
@@ -273,11 +334,6 @@ export async function sendLeaseRenewalReminders(targetDate?: string): Promise<{
   let skipped = 0;
 
   for (const row of rows) {
-    if (!row.phone) {
-      skipped++;
-      continue;
-    }
-
     const message = templates.leaseRenewalReminderSms({
       tenantName: row.fullName,
       expiryDate: row.endDate,
@@ -285,10 +341,18 @@ export async function sendLeaseRenewalReminders(targetDate?: string): Promise<{
       unitNumber: row.unitNumber,
     });
 
-    const ok = await safeSend(row.phone, message);
-    if (ok) {
+    const result = await routedSend({
+      userId: row.clerkUserId,
+      agencyId: row.agencyId,
+      phone: row.phone,
+      message,
+      type: "LEASE",
+    });
+
+    if (result.skipped) {
+      skipped++;
+    } else if (result.success) {
       sent++;
-      // Mark reminder as sent so we don't spam
       await db
         .update(leases)
         .set({ renewalReminderSentAt: new Date() })
@@ -302,17 +366,15 @@ export async function sendLeaseRenewalReminders(targetDate?: string): Promise<{
   return { sent, failed, skipped };
 }
 
-// ── 6. New Complaint Filed → Notify Manager ──────────────────────────────────
+// ── 6. New Complaint Filed → Notify Manager — GATED ─────────────────────────
 
-export async function sendNewComplaintManagerSms(
-  complaintId: string
-): Promise<boolean> {
+export async function sendNewComplaintManagerSms(complaintId: string): Promise<boolean> {
   const db = getDb();
 
-  // Fetch complaint + tenant + building + unit
   const [complaint] = await db
     .select({
       tenantId: complaints.tenantId,
+      agencyId: complaints.agencyId,
       title: complaints.title,
       priority: complaints.priority,
       assignedTo: complaints.assignedTo,
@@ -320,12 +382,14 @@ export async function sendNewComplaintManagerSms(
     .from(complaints)
     .where(eq(complaints.id, complaintId));
 
-  if (!complaint) return false;
+  if (!complaint?.assignedTo) {
+    console.warn(`[SMS] Complaint ${complaintId} has no assigned manager — skipping`);
+    return false;
+  }
 
   const [tenant] = await db
     .select({
       fullName: tenants.fullName,
-      phone: tenants.phone,
       buildingId: tenants.buildingId,
       unitId: tenants.unitId,
     })
@@ -334,40 +398,54 @@ export async function sendNewComplaintManagerSms(
 
   if (!tenant) return false;
 
-  const [building] = await db
-    .select({ name: buildings.name })
-    .from(buildings)
-    .where(eq(buildings.id, tenant.buildingId));
+  const [manager] = await db
+    .select({ fullName: staff.fullName, phone: staff.phone })
+    .from(staff)
+    .where(eq(staff.clerkUserId, complaint.assignedTo));
+
+  if (!manager?.phone) {
+    console.warn(`[SMS] No phone on file for manager ${complaint.assignedTo}`);
+    return false;
+  }
 
   const [unit] = await db
     .select({ unitNumber: units.unitNumber })
     .from(units)
     .where(eq(units.id, tenant.unitId));
 
-  // If assignedTo is set, try to get manager's phone from Clerk metadata
-  // Otherwise, we can't send — the agency owner should configure a manager phone
-  // For now, we log a warning. In production, store manager phone in a staff table.
-  if (!complaint.assignedTo) {
-    console.warn(`[SMS] Complaint ${complaintId} has no assigned manager — skipping manager SMS`);
-    return false;
-  }
+  const [building] = await db
+    .select({ name: buildings.name })
+    .from(buildings)
+    .where(eq(buildings.id, tenant.buildingId));
 
-  // TODO: Look up manager phone from a staff/roles table when you build one
-  // For now, this function returns false and logs — you'll wire it to your staff table in Week 15
-  console.warn(`[SMS] Manager lookup not yet implemented for clerkId ${complaint.assignedTo}`);
-  return false;
+  const message = templates.newComplaintManagerSms({
+    managerName: manager.fullName,
+    tenantName: tenant.fullName,
+    unitNumber: unit?.unitNumber ?? "unknown unit",
+    buildingName: building?.name ?? "the building",
+    title: complaint.title,
+    priority: complaint.priority,
+  });
+
+  const { success } = await routedSend({
+    userId: complaint.assignedTo,
+    agencyId: complaint.agencyId,
+    phone: manager.phone,
+    message,
+    type: "COMPLAINT_FILED",
+  });
+  return success;
 }
 
-// ── 7. Complaint Resolved → Notify Tenant ────────────────────────────────────
+// ── 7. Complaint Resolved → Notify Tenant — GATED ───────────────────────────
 
-export async function sendComplaintResolvedSms(
-  complaintId: string
-): Promise<boolean> {
+export async function sendComplaintResolvedSms(complaintId: string): Promise<boolean> {
   const db = getDb();
 
   const [complaint] = await db
     .select({
       tenantId: complaints.tenantId,
+      agencyId: complaints.agencyId,
       title: complaints.title,
     })
     .from(complaints)
@@ -381,6 +459,7 @@ export async function sendComplaintResolvedSms(
       phone: tenants.phone,
       buildingId: tenants.buildingId,
       unitId: tenants.unitId,
+      clerkUserId: tenants.clerkUserId,
     })
     .from(tenants)
     .where(eq(tenants.id, complaint.tenantId));
@@ -404,10 +483,17 @@ export async function sendComplaintResolvedSms(
     unitNumber: unit?.unitNumber ?? "your unit",
   });
 
-  return safeSend(tenant.phone, message);
+  const { success } = await routedSend({
+    userId: tenant.clerkUserId,
+    agencyId: complaint.agencyId,
+    phone: tenant.phone,
+    message,
+    type: "COMPLAINT_RESOLVED",
+  });
+  return success;
 }
 
-// ── 8. Tenant Invite Sent ────────────────────────────────────────────────────
+// ── 8. Tenant Invite Sent — GATED ───────────────────────────────────────────
 
 export async function sendTenantInviteSms(
   tenantId: string,
@@ -416,7 +502,12 @@ export async function sendTenantInviteSms(
 ): Promise<boolean> {
   const db = getDb();
   const [tenant] = await db
-    .select({ fullName: tenants.fullName, phone: tenants.phone })
+    .select({
+      fullName: tenants.fullName,
+      phone: tenants.phone,
+      agencyId: tenants.agencyId,
+      clerkUserId: tenants.clerkUserId,
+    })
     .from(tenants)
     .where(eq(tenants.id, tenantId));
 
@@ -428,15 +519,17 @@ export async function sendTenantInviteSms(
     inviteLink,
   });
 
-  return safeSend(tenant.phone, message);
+  const { success } = await routedSend({
+    userId: tenant.clerkUserId,
+    agencyId: tenant.agencyId,
+    phone: tenant.phone,
+    message,
+    type: "INVITE",
+  });
+  return success;
 }
 
-// ── ADDITION to lib/sms/triggers.ts ──────────────────────────────────────
-// Insert this alongside sendPaymentReceivedSms / sendPaymentFailedSms
-// (same file, same pattern — fetch tenant, build message via templates,
-// safeSend). Needed by app/(admin)/refunds/actions.ts (refundDuplicatePayment).
-
-// ── 9. Refund Confirmation (from the refund runbook, after B2C initiation) ──
+// ── 9. Refund Confirmation — NOT GATED ──────────────────────────────────────
 
 export async function sendRefundConfirmationSms(
   tenantId: string,

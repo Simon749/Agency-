@@ -1,11 +1,11 @@
 // lib/daraja/client.ts
 // Safaricom Daraja API client for STK Push and Access Tokens
-// FIX: Added idempotency check before initiating STK Push to prevent duplicate charges.
+// PHASE H: Added aggregator support. Rate limiting + circuit breaker are checked BEFORE calling this.
 
 import { eq, and } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { buildings, pendingTransactions } from "@/db/schema";
-import { decrypt } from "@/lib/encryption";
+import { decryptCredential } from "@/lib/encryption"; // was: decrypt
 import {
   generatePassword,
   generateTimestamp,
@@ -16,7 +16,7 @@ import type {
   StkPushRequest,
   StkPushResponse,
 } from "./types";
-import { PaybillStrategy } from "../payments/paybill-strategy";
+import { getPaybillStrategy, type PaybillStrategy } from "@/lib/payments/paybill-strategy";
 
 const DARAJA_BASE_URL =
   process.env.DARAJA_ENV === "production"
@@ -40,16 +40,24 @@ export async function getAccessToken(buildingId: string): Promise<string> {
     throw new Error(`Daraja credentials not configured for building ${buildingId}`);
   }
 
-  const key = decrypt(building.consumerKey);
-  const secret = decrypt(building.consumerSecret);
+  return getAccessTokenFromCredentials(building.consumerKey, building.consumerSecret);
+}
+
+/**
+ * Get access token from raw (encrypted) credentials.
+ */
+export async function getAccessTokenFromCredentials(
+  encryptedConsumerKey: string,
+  encryptedConsumerSecret: string
+): Promise<string> {
+  const key = decryptCredential(encryptedConsumerKey);
+  const secret = decryptCredential(encryptedConsumerSecret);
 
   const credentials = Buffer.from(`${key}:${secret}`).toString("base64");
 
   const res = await fetch(`${DARAJA_BASE_URL}/oauth/v1/generate?grant_type=client_credentials`, {
     method: "GET",
-    headers: {
-      Authorization: `Basic ${credentials}`,
-    },
+    headers: { Authorization: `Basic ${credentials}` },
   });
 
   if (!res.ok) {
@@ -61,6 +69,27 @@ export async function getAccessToken(buildingId: string): Promise<string> {
   return data.access_token;
 }
 
+/**
+ * Get aggregator master credentials from environment.
+ */
+export function getAggregatorCredentials(): {
+  shortcode: string;
+  passkey: string;
+  consumerKey: string;
+  consumerSecret: string;
+} {
+  const shortcode = process.env.AGGREGATOR_SHORTCODE;
+  const passkey = process.env.AGGREGATOR_PASSKEY;
+  const consumerKey = process.env.AGGREGATOR_CONSUMER_KEY;
+  const consumerSecret = process.env.AGGREGATOR_CONSUMER_SECRET;
+
+  if (!shortcode || !passkey || !consumerKey || !consumerSecret) {
+    throw new Error("Aggregator Daraja credentials not configured in environment variables");
+  }
+
+  return { shortcode, passkey, consumerKey, consumerSecret };
+}
+
 export interface InitiateStkPushParams {
   buildingId: string;
   tenantId: string;
@@ -69,27 +98,25 @@ export interface InitiateStkPushParams {
   accountReference?: string;
   transactionDesc?: string;
   callbackUrl: string;
+  /** Optional: override paybill strategy (for aggregator or testing) */
   strategy?: PaybillStrategy;
 }
 
 /**
  * Initiate an STK Push to the tenant's phone.
- * 
- * FIX: Idempotency guard — checks for an existing PENDING transaction for this
- * tenant within the last 5 minutes before calling Daraja. Prevents duplicate
- * STK Push prompts when the tenant double-clicks the Pay button.
+ *
+ * PHASE H: Supports both building-owned paybill and shared aggregator paybill.
+ * Callers should check rate limits + circuit breaker BEFORE invoking this.
  */
 export async function initiateStkPush(
   params: InitiateStkPushParams
 ): Promise<StkPushResponse> {
-  const { buildingId, tenantId, phone, amount, accountReference, transactionDesc, callbackUrl } =
+  const { buildingId, tenantId, phone, amount, accountReference, transactionDesc, callbackUrl, strategy } =
     params;
 
   const db = getDb();
 
   // ── IDEMPOTENCY GUARD ──
-  // Check if there's a recent PENDING transaction for this tenant.
-  // If found within the last 5 minutes, reject the duplicate request.
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
   const [recentPending] = await db
     .select({
@@ -105,7 +132,7 @@ export async function initiateStkPush(
         eq(pendingTransactions.buildingId, buildingId)
       )
     )
-    .orderBy(pendingTransactions.initiatedAt) // oldest first
+    .orderBy(pendingTransactions.initiatedAt)
     .limit(1);
 
   if (recentPending && new Date(recentPending.initiatedAt) > fiveMinutesAgo) {
@@ -115,20 +142,28 @@ export async function initiateStkPush(
     );
   }
 
-  const [building] = await db
-    .select({
-      shortcode: buildings.darajaShortcode,
-      passkey: buildings.darajaPasskey,
-    })
-    .from(buildings)
-    .where(eq(buildings.id, buildingId));
+  // Resolve paybill strategy if not provided
+  const paybill = strategy ?? await getPaybillStrategy(buildingId, tenantId);
 
-  if (!building?.shortcode || !building?.passkey) {
-    throw new Error(`Daraja shortcode/passkey missing for building ${buildingId}`);
+  let shortcode: string;
+  let passkey: string;
+  let accessToken: string;
+  let finalAccountReference: string;
+
+  if (paybill.type === "OWN") {
+    shortcode = decryptCredential(paybill.shortcode);
+    passkey = decryptCredential(paybill.passkey);
+    accessToken = await getAccessTokenFromCredentials(paybill.consumerKey, paybill.consumerSecret);
+    finalAccountReference = accountReference ?? tenantId;
+  } else {
+    // AGGREGATOR
+    const agg = getAggregatorCredentials();
+    shortcode = agg.shortcode;
+    passkey = agg.passkey;
+    accessToken = await getAccessTokenFromCredentials(agg.consumerKey, agg.consumerSecret);
+    finalAccountReference = accountReference ?? paybill.accountReference;
   }
 
-  const shortcode = decrypt(building.shortcode);
-  const passkey = decrypt(building.passkey);
   const timestamp = generateTimestamp();
   const password = generatePassword(shortcode, passkey, timestamp);
   const formattedPhone = formatPhoneForDaraja(phone);
@@ -143,11 +178,9 @@ export async function initiateStkPush(
     PartyB: shortcode,
     PhoneNumber: formattedPhone,
     CallBackURL: callbackUrl,
-    AccountReference: accountReference ?? tenantId,
+    AccountReference: finalAccountReference,
     TransactionDesc: transactionDesc ?? "Rent Payment",
   };
-
-  const accessToken = await getAccessToken(buildingId);
 
   const res = await fetch(`${DARAJA_BASE_URL}/mpesa/stkpush/v1/processrequest`, {
     method: "POST",

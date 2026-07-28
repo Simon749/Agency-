@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const balance = await getTenantBalance(tenantId);
+    const balance = await getTenantBalance(tenantId,  sessionStorage.agencyId);
     return NextResponse.json(balance);
   } catch (err) {
     console.error("Balance API error:", err);

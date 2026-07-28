@@ -49,7 +49,7 @@ export default async function AdminTenantLedgerPage({
     .limit(1);
 
   const { rows } = await getTenantStatement(tenant.id);
-  const balance = await getTenantBalance(tenant.id);
+  const balance = await getTenantBalance(tenant.id, agencyId);
   const monthlyGroups = await getMonthlySummary(tenant.id);
   const finalBalance = balance.balance;
 

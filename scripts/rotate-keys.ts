@@ -10,7 +10,7 @@
  */
 
 import { parseArgs } from "node:util";
-import { db } from "@/db/schema";
+import { getDb } from "@/lib/db"; // was: import { db } from "@/lib/db";
 import { buildings } from "@/db/schema";
 import { eq, and, isNotNull } from "drizzle-orm";
 import { reencryptCredential } from "@/lib/encryption";
@@ -62,6 +62,7 @@ interface RotationResult {
 const results: RotationResult[] = [];
 
 async function rotateDarajaCredentials(): Promise<void> {
+  const db = getDb();
   console.log("\n🔐 Daraja Credential Rotation");
   console.log("================================");
 

@@ -12,7 +12,7 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { buildings } from "@/db/schema";
-import { decrypt } from "@/lib/encryption";
+import { decryptCredential } from "@/lib/encryption";
 import { getAccessToken } from "./client";
 import { formatPhoneForDaraja } from "./utils";
 
@@ -64,7 +64,7 @@ export async function initiateB2CRefund(params: B2CRefundParams): Promise<B2CRef
     );
   }
 
-  const securityCredential = decrypt(building.securityCredential);
+  const securityCredential = decryptCredential(building.securityCredential);
   const accessToken = await getAccessToken(buildingId);
   const formattedPhone = formatPhoneForDaraja(phone);
 

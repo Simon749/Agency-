@@ -50,7 +50,7 @@ export default function AdminComplaintDetailPage({
   }
 
   const { complaint, tenantName, tenantPhone, tenantEmail, buildingName, unitNumber, updates } = detail;
-  const photos = complaint.photoUrls ? complaint.photoUrls.split(",") : [];
+  const photos: string[] = complaint.photoUrls || [];
 
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault();

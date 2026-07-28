@@ -123,7 +123,7 @@ export const agencies = pgTable("agencies", {
   terminatedBy: text("terminated_by"),                   // Super Admin clerkUserId
   dataExportedAt: timestamp("data_exported_at"),          // when archive was generated
   gracePeriodEndsAt: timestamp("grace_period_ends_at"),  // for subscription grace periods
-
+  defaultCommissionRate: numeric("default_commission_rate", { precision: 5, scale: 2 }).default("0.00"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -146,6 +146,83 @@ export const staff = pgTable("staff", {
   deactivatedAt: timestamp("deactivated_at"),
 });
 
+// ── STK Push Queue ──────────────────────────────────────────────
+
+export const stkPushQueue = pgTable("stk_push_queue", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  buildingId: uuid("building_id").notNull(),
+  agencyId: uuid("agency_id").notNull(),
+  amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
+  phone: text("phone").notNull(),
+  accountReference: text("account_reference").notNull(),
+  transactionDesc: text("transaction_desc"),
+  // Which shortcode/aggregator this request should use
+  shortcodeType: text("shortcode_type").default("OWN").notNull(), // "OWN" | "AGGREGATOR"
+  aggregatorAccountId: uuid("aggregator_account_id"),
+
+  status: text("status").default("PENDING").notNull(),
+  scheduledAt: timestamp("scheduled_at").defaultNow().notNull(),
+  processedAt: timestamp("processed_at"),
+  errorMessage: text("error_message"),
+  attemptCount: integer("attempt_count").default(0).notNull(),
+  maxAttempts: integer("max_attempts").default(3).notNull(),
+
+  // Link to pending_transactions once initiated
+  pendingTransactionId: uuid("pending_transaction_id"),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+
+// ── Notification Preferences ──────────────────────────────────────────────
+
+export const notificationPreferences = pgTable("notification_preferences", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  agencyId: uuid("agency_id")
+    .references(() => agencies.id, { onDelete: "cascade" })
+    .notNull()
+    .unique(),
+  fallbackToSms: boolean("fallback_to_sms").default(true).notNull(),
+  whatsappPhone: text("whatsapp_phone"),
+  channelOverrides: text("channel_overrides"), // JSON string
+  preferredChannel: text("preferred_channel").default("SMS").notNull(), // "SMS" | "WHATSAPP"
+  notifyPaymentReceived: boolean("notify_payment_received").default(true).notNull(),
+  notifyRentReminder: boolean("notify_rent_reminder").default(true).notNull(),
+  notifyOverdue: boolean("notify_overdue").default(true).notNull(),
+  notifyLeaseRenewal: boolean("notify_lease_renewal").default(true).notNull(),
+  notifyComplaintFiled: boolean("notify_complaint_filed").default(true).notNull(),
+  notifyComplaintResolved: boolean("notify_complaint_resolved").default(true).notNull(),
+  notifyInviteSent: boolean("notify_invite_sent").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+
+// ── aggregatorAccounts ──────────────────────────────────────────────────────
+
+export const aggregatorAccounts = pgTable("aggregator_accounts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  agencyId: uuid("agency_id")
+    .references(() => agencies.id, { onDelete: "cascade" })
+    .notNull(),
+  buildingId: uuid("building_id")
+    .references(() => buildings.id, { onDelete: "cascade" })
+    .notNull(),
+  tenantId: uuid("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  // Short account reference used for manual paybill payments (e.g., "PF123456")
+  accountReference: text("account_reference").unique().notNull(),
+  // The aggregator master shortcode this account is registered under
+  aggregatorShortcode: text("aggregator_shortcode").notNull(),
+  // For STK Push, we may use a different reference format
+  stkPushReference: text("stk_push_reference").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
 // ── Buildings ──────────────────────────────────────────────────────
 
 export const buildings = pgTable("buildings", {
@@ -162,9 +239,13 @@ export const buildings = pgTable("buildings", {
   darajaConsumerSecret: text("daraja_consumer_secret"),
   darajaShortcode: text("daraja_shortcode"),
   darajaPasskey: text("daraja_passkey"),
-  agreementTemplate: text("agreement_template"), // ← NEW: per-building lease template
+  darajaCredentialsUpdatedAt: timestamp("daraja_credentials_updated_at"), // ← add this
+  paymentMode: text("payment_mode").default("OWN_SHORTCODE").notNull(), // "OWN_SHORTCODE" | "AGGREGATOR"
+  agreementTemplate: text("agreement_template"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(), // ← add this too, buildings.ts (dead file) had it and it's generally useful
 });
+
 
 // ── Building Utilities ─────────────────────────────────────────────
 
@@ -444,15 +525,27 @@ export const reconciliationDiscrepancies = pgTable("reconciliation_discrepancies
   id: uuid("id").primaryKey().defaultRandom(),
   agencyId: uuid("agency_id").notNull(),
   buildingId: uuid("building_id").notNull(),
-  discrepancyType: text("discrepancy_type").notNull(), // "DARAJA_MISSING", "LEDGER_MISSING", "AMOUNT_MISMATCH"
+  discrepancyType: text("discrepancy_type").notNull(),
+
   darajaTransactionId: text("daraja_transaction_id"),
+  darajaAmount: numeric("daraja_amount", { precision: 10, scale: 2 }),
+  darajaPhone: text("daraja_phone"),
+  darajaTimestamp: text("daraja_timestamp"),
+
   ledgerEntryId: uuid("ledger_entry_id"),
+  ledgerReferenceCode: text("ledger_reference_code"),
+  ledgerAmount: numeric("ledger_amount", { precision: 10, scale: 2 }),
+  ledgerTenantId: uuid("ledger_tenant_id"),
+
   amount: numeric("amount", { precision: 10, scale: 2 }),
   expectedAmount: numeric("expected_amount", { precision: 10, scale: 2 }),
   transactionDate: timestamp("transaction_date"),
-  status: text("status").default("UNRESOLVED"), // "UNRESOLVED", "INVESTIGATING", "RESOLVED"
+  reportDate: text("report_date"),
+  reason: text("reason"),
+
+  status: text("status").default("UNRESOLVED"),
   resolvedAt: timestamp("resolved_at"),
-  resolvedBy: text("resolved_by"), // clerk ID
+  resolvedBy: text("resolved_by"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

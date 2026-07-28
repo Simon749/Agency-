@@ -2,10 +2,11 @@ import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { generateSecret, generateURI } from "otplib";
 import QRCode from "qrcode";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db"; // was: import { db } from "@/lib/db";
 import { usersMfa } from "@/db/schema/users-mfa";
 
 export async function POST(req: NextRequest) {
+  const db = getDb();
   try {
     const { userId } = await auth();
     if (!userId) {

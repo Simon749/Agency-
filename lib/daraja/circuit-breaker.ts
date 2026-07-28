@@ -1,6 +1,6 @@
 /**
  * Circuit breaker for Daraja API.
- * 
+ *
  * States:
  * - CLOSED: Normal operation, requests pass through
  * - OPEN: Too many failures, requests are rejected immediately
@@ -24,21 +24,23 @@ const DEFAULT_COOLDOWN_MS = 30000; // 30 seconds
 const DEFAULT_SUCCESS_THRESHOLD = 2;
 
 export function getCircuitState(key: string): CircuitRecord {
-  return circuits.get(key) ?? {
-    state: "CLOSED",
-    failures: 0,
-    successCount: 0,
-    lastFailureTime: 0,
-    nextAttempt: 0,
-  };
+  return (
+    circuits.get(key) ?? {
+      state: "CLOSED",
+      failures: 0,
+      successCount: 0,
+      lastFailureTime: 0,
+      nextAttempt: 0,
+    }
+  );
 }
 
 export function canExecute(key: string): boolean {
   const record = getCircuitState(key);
   const now = Date.now();
-  
+
   if (record.state === "CLOSED") return true;
-  
+
   if (record.state === "OPEN") {
     if (now >= record.nextAttempt) {
       record.state = "HALF_OPEN";
@@ -48,7 +50,7 @@ export function canExecute(key: string): boolean {
     }
     return false;
   }
-  
+
   // HALF_OPEN
   return true;
 }
@@ -56,7 +58,7 @@ export function canExecute(key: string): boolean {
 export function recordSuccess(key: string): void {
   const record = getCircuitState(key);
   record.failures = 0;
-  
+
   if (record.state === "HALF_OPEN") {
     record.successCount++;
     if (record.successCount >= DEFAULT_SUCCESS_THRESHOLD) {
@@ -64,27 +66,33 @@ export function recordSuccess(key: string): void {
       record.successCount = 0;
     }
   }
-  
+
   circuits.set(key, record);
 }
 
 export function recordFailure(key: string): void {
   const record = getCircuitState(key);
   const now = Date.now();
-  
+
   record.failures++;
   record.lastFailureTime = now;
-  
-  if (record.state === "HALF_OPEN" || record.failures >= DEFAULT_FAILURE_THRESHOLD) {
+
+  if (
+    record.state === "HALF_OPEN" ||
+    record.failures >= DEFAULT_FAILURE_THRESHOLD
+  ) {
     record.state = "OPEN";
     record.nextAttempt = now + DEFAULT_COOLDOWN_MS;
     record.successCount = 0;
   }
-  
+
   circuits.set(key, record);
 }
 
-export function getCircuitBreakerStatus(): Record<string, { state: CircuitState; failures: number }> {
+export function getCircuitBreakerStatus(): Record<
+  string,
+  { state: CircuitState; failures: number }
+> {
   const status: Record<string, { state: CircuitState; failures: number }> = {};
   for (const [key, record] of circuits) {
     status[key] = { state: record.state, failures: record.failures };
