@@ -42,7 +42,7 @@ importers:
         specifier: ^11.18.0
         version: 11.18.0(typescript@5.9.3)
       '@upstash/qstash':
-        specifier: ^2.11.2
+        specifier: ^2.11.3
         version: 2.11.3
       '@upstash/redis':
         specifier: ^1.38.0
@@ -99,7 +99,7 @@ importers:
         specifier: ^13.4.1
         version: 13.4.1
       pg:
-        specifier: ^8.21.0
+        specifier: ^8.22.0
         version: 8.22.0
       qrcode:
         specifier: ^1.5.4
