@@ -11,6 +11,9 @@ importers:
       '@clerk/nextjs':
         specifier: ^7.4.3
         version: 7.6.1(next@16.2.7(@babel/core@7.29.7)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@hono/node-server':
+        specifier: ^2.0.12
+        version: 2.0.12(hono@4.12.32)
       '@neondatabase/serverless':
         specifier: ^1.1.0
         version: 1.1.0
@@ -86,9 +89,15 @@ importers:
       gsap:
         specifier: ^3.15.0
         version: 3.15.0
+      hono:
+        specifier: ^4.12.32
+        version: 4.12.32
       input-otp:
         specifier: ^1.4.2
         version: 1.4.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      jose:
+        specifier: ^6.2.4
+        version: 6.2.4
       lucide-react:
         specifier: ^1.17.0
         version: 1.27.0(react@19.2.4)
@@ -946,6 +955,12 @@ packages:
   '@hono/node-server@1.19.17':
     resolution: {integrity: sha512-dSneS5qhiauZWGDCeK4o695Xd9nUNjviSZCMQrj10eetr8Uln1ucn6bbphOM6UynAMMtNIzZNSpL9vnASJwrPQ==}
     engines: {node: '>=18.14.1'}
+    peerDependencies:
+      hono: ^4
+
+  '@hono/node-server@2.0.12':
+    resolution: {integrity: sha512-eWpQYr67tqJLeaSUl0Q+TquuYfUdTibpOJlUMV2FfUP7+KqCC5TufnwnlXL6mobZBJbGAYRd7ZvEBDCbLInjhg==}
+    engines: {node: '>=20'}
     peerDependencies:
       hono: ^4
 
@@ -5776,6 +5791,10 @@ snapshots:
   '@floating-ui/utils@0.2.12': {}
 
   '@hono/node-server@1.19.17(hono@4.12.32)':
+    dependencies:
+      hono: 4.12.32
+
+  '@hono/node-server@2.0.12(hono@4.12.32)':
     dependencies:
       hono: 4.12.32
 

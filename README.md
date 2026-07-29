@@ -112,3 +112,5 @@ rm -rf node_modules/.cache
 
 
 pnpm ls next react react-dom -r
+npx drizzle-kit generate
+npx drizzle-kit push
