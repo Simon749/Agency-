@@ -228,6 +228,15 @@ export async function terminateAgencyAction(
 }
 
 // ── 4. Record Subscription Payment (Manual Entry) ────────────────────────
+// FIXED: Now accepts an object matching the form component's field names.
+
+export interface RecordSubscriptionPaymentInput {
+  agencyId: string;
+  amount: number;
+  method: "CASH" | "BANK_RECEIPT" | "MPESA_STK" | "MPESA_PAYBILL";
+  referenceCode?: string;
+  description?: string;
+}
 
 export interface RecordPaymentResult {
   success: boolean;
@@ -236,18 +245,12 @@ export interface RecordPaymentResult {
 }
 
 export async function recordSubscriptionPayment(
-  agencyId: string,
-  formData: FormData
+  input: RecordSubscriptionPaymentInput
 ): Promise<RecordPaymentResult> {
   await requireRole(["SUPER_ADMIN"]);
   const session = await getSessionMeta();
 
-  const amount      = parseFloat(formData.get("amount") as string);
-  const method      = (formData.get("method") as string) || "MPESA_PAYBILL";
-  const reference   = (formData.get("reference") as string)?.trim();
-  const notes       = (formData.get("notes") as string)?.trim();
-  const periodStart = (formData.get("periodStart") as string)?.trim();
-  const periodEnd   = (formData.get("periodEnd") as string)?.trim();
+  const { agencyId, amount, method, referenceCode, description } = input;
 
   if (!amount || amount <= 0) {
     return { success: false, error: "Valid amount is required." };
@@ -276,11 +279,11 @@ export async function recordSubscriptionPayment(
         amount: String(amount),
         method: method as any,
         status: "CONFIRMED",
-        referenceCode: reference || null,
+        referenceCode: referenceCode || null,
         recordedBy: session.userId,
-        notes: notes || null,
-        billingPeriodStart: periodStart || null,
-        billingPeriodEnd: periodEnd || null,
+        notes: description || null,
+        billingPeriodStart: null,
+        billingPeriodEnd: null,
         confirmedAt: new Date(),
         confirmedBy: session.userId,
       })
@@ -321,7 +324,7 @@ export async function recordSubscriptionPayment(
 
     return { success: true, paymentId: payment.id };
   } catch (err) {
-    console.error("[recordPayment] Failed:", err);
+    console.error("[recordSubscriptionPayment] Failed:", err);
     return { success: false, error: "Failed to record payment." };
   }
 }

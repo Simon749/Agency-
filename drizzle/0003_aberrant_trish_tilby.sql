@@ -1,0 +1,1 @@
+CREATE TYPE "public"."mfa_status" AS ENUM('PENDING', 'ENABLED', 'DISABLED');

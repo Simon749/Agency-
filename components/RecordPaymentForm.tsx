@@ -15,7 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { recordPayment } from "@/lib/ledger/actions";
+import { recordSubscriptionPayment } from "@/lib/super-admin/actions";
 
 interface Props {
   agencyId: string;
@@ -36,31 +36,31 @@ export function RecordPaymentForm({
   const router = useRouter();
 
   async function handleSubmit(formData: FormData) {
-    setIsSubmitting(true);
-    setError(null);
+  setIsSubmitting(true);
+  setError(null);
 
-    try {
-      const result = await recordPayment({
-        tenantId: agencyId,
-        buildingId: agencyId,
-        amount: parseFloat(formData.get("amount") as string),
-        method: formData.get("method") as "CASH" | "BANK_RECEIPT" | "MPESA_STK",
-        referenceCode: (formData.get("referenceCode") as string) || undefined,
-        description: (formData.get("description") as string) || undefined,
-      });
+  try {
+    const result = await recordSubscriptionPayment({
+      agencyId,
+      amount: parseFloat(formData.get("amount") as string),
+      method: formData.get("method") as "CASH" | "BANK_RECEIPT" | "MPESA_STK",
+      referenceCode: (formData.get("referenceCode") as string) || undefined,
+      description: (formData.get("description") as string) || undefined,
+    });
 
-      if (result.success) {
-        setOpen(false);
-        router.refresh();
-      } else {
-        setError(result.error ?? "Failed to record payment");
-      }
-    } catch {
-      setError("Something went wrong. Please try again.");
-    } finally {
-      setIsSubmitting(false);
+    if (result.success) {
+      setOpen(false);
+      router.refresh();
+    } else {
+      setError(result.error ?? "Failed to record payment");
     }
+  } catch (err) {
+    console.error(err);
+    setError(err instanceof Error ? err.message : "Something went wrong.");
+  } finally {
+    setIsSubmitting(false);
   }
+}
 
   return (
     <>
