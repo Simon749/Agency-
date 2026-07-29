@@ -28,6 +28,7 @@ export * from "./aggregatorAccounts";
 export * from "./notificationPreferences";
 export * from "./stkPushQueue";
 export { staff } from "./staff";
+export { usersMfa } from "./users-mfa";
 export type { Staff, InsertStaff } from "./staff";
 export type { ReconciliationDiscrepancy, InsertReconciliationDiscrepancy } from "./reconciliation_discrepancies";
 export type { AuditLogEntry, InsertAuditLogEntry } from "./audit_log";  // ← PHASE B: NEW

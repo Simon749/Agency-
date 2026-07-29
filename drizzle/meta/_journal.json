@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1785228238587,
+      "tag": "0000_colossal_hobgoblin",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785228758136,
+      "tag": "0001_colorful_fantastic_four",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785229544856,
+      "tag": "0002_fine_ikaris",
+      "breakpoints": true
+    }
+  ]
+}

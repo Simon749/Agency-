@@ -2,29 +2,33 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { TRPCProvider } from "@/app/providers/trpc";
-import Preloader from "@/app/sections/Preloader";
 
-export default function Providers({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const [preloaderDone, setPreloaderDone] = useState(false);
+const Preloader = dynamic(() => import("@/app/sections/Preloader"), {
+  ssr: false,
+  loading: () => null,
+});
+
+export default function Providers({ children }: { children: React.ReactNode }) {
+  const [showPreloader, setShowPreloader] = useState(false);
 
   useEffect(() => {
     const hasPlayed = sessionStorage.getItem("propflow_preloader_played");
-    if (hasPlayed === "true") {
-      setPreloaderDone(true);
+    if (hasPlayed !== "true") {
+      setShowPreloader(true);
     }
   }, []);
 
   return (
     <TRPCProvider>
-      {!preloaderDone && (
-        <Preloader onDone={() => setPreloaderDone(true)} />
+      {children}
+      {showPreloader && (
+        <Preloader onDone={() => {
+          sessionStorage.setItem("propflow_preloader_played", "true");
+          setShowPreloader(false);
+        }} />
       )}
-      {preloaderDone && children}
     </TRPCProvider>
   );
 }

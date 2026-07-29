@@ -1,12 +1,11 @@
-import { auth, clerkClient } from "@clerk/nextjs/server";
-import { NextRequest, NextResponse } from "next/server";
-import { verify } from "otplib";
-import { getDb } from "@/lib/db"; // was: import { db } from "@/lib/db";
-import { usersMfa } from "@/db/schema/users-mfa";
+import { getDb } from "@/lib/db";
+import { usersMfa } from "@/db/schema";
+import { auth } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
+import { verifyTOTP } from "@/lib/totp";
 import { eq } from "drizzle-orm";
 
-export async function POST(req: NextRequest) {
-  const db = getDb();
+export async function POST(req: Request) {
   try {
     const { userId } = await auth();
     if (!userId) {
@@ -14,43 +13,53 @@ export async function POST(req: NextRequest) {
     }
 
     const { code } = await req.json();
-    if (!code || code.length !== 6) {
-      return NextResponse.json({ error: "Invalid code format" }, { status: 400 });
+    if (!code || typeof code !== "string") {
+      return NextResponse.json({ error: "Code required" }, { status: 400 });
     }
 
-    const [mfaRecord] = await db.select().from(usersMfa).where(eq(usersMfa.clerkUserId, userId)).limit(1);
+    const db = getDb();
+    const [mfa] = await db
+      .select()
+      .from(usersMfa)
+      .where(eq(usersMfa.clerkUserId, userId))
+      .limit(1);
 
-    if (!mfaRecord || mfaRecord.status !== "PENDING") {
+    if (!mfa) {
       return NextResponse.json(
-        { error: "No pending MFA setup found. Start setup first." },
+        { error: "MFA not set up. Call /api/mfa/setup first." },
         { status: 400 }
       );
     }
 
-    const result = await verify({ token: code, secret: mfaRecord.secret });
-    if (!result.valid) {
-      return NextResponse.json({ error: "Invalid verification code. Please try again." }, { status: 400 });
+    const isValid = verifyTOTP(mfa.secret, code);
+
+    if (!isValid) {
+      return NextResponse.json(
+        { error: "Invalid code. Try again." },
+        { status: 400 }
+      );
     }
 
-    const client = await clerkClient();
-    const user = await client.users.getUser(userId);
-    await client.users.updateUser(userId, {
-      publicMetadata: {
-        ...user.publicMetadata,
-        mfaEnabled: true,
-        mfaEnabledAt: new Date().toISOString(),
-      },
+    await db
+      .update(usersMfa)
+      .set({
+        status: "ENABLED",
+        verifiedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(usersMfa.clerkUserId, userId));
+
+    return NextResponse.json({
+      message: "MFA enabled successfully.",
     });
-
-    await db.update(usersMfa).set({
-      status: "ACTIVE",
-      verifiedAt: new Date(),
-      updatedAt: new Date(),
-    }).where(eq(usersMfa.clerkUserId, userId));
-
-    return NextResponse.json({ success: true });
-  } catch (err) {
-    console.error("[MFA VERIFY] Error:", err);
-    return NextResponse.json({ error: "Failed to verify MFA" }, { status: 500 });
+  } catch (error) {
+    console.error("[MFA VERIFY] Error:", error);
+    return NextResponse.json(
+      {
+        error: "Failed to verify MFA",
+        details: error instanceof Error ? error.message : String(error),
+      },
+      { status: 500 }
+    );
   }
 }

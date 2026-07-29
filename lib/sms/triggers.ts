@@ -23,7 +23,7 @@ import {
   staff,
 } from "@/db/schema";
 import { sendSms } from "./sendSms";
-import { dispatchNotification, type NotificationType } from "@/lib/notifications/channel-router";
+import { dispatchNotification, type NotificationType } from "../notifications/channel-router";
 import * as templates from "./templates";
 
 // ── Helper: ungated direct send (payment failed, refunds) ─────────────────

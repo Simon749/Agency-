@@ -4,17 +4,11 @@ import { ClerkProvider } from "@clerk/nextjs";
 import Providers from "./providers";
 import { Toaster } from "@/components/ui/toaster";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
+import { UnregisterSW } from "./UnregisterSW";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
+const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Real Estate Management",
@@ -23,9 +17,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: Readonly<{ children: React.ReactNode }>) {
   return (
     <ClerkProvider>
       <html
@@ -34,17 +26,18 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <body className="h-full" suppressHydrationWarning>
+          {process.env.NODE_ENV === "development" && <UnregisterSW />}
           <Providers>
-            <ServiceWorkerRegister />
+            {process.env.NODE_ENV === "production" && <ServiceWorkerRegister />}
             {children}
-            <Toaster 
+            <Toaster
               position="bottom-right"
               toastOptions={{
                 style: {
-                  background: 'rgba(20, 20, 20, 0.95)',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  color: '#ffffff',
-                  borderRadius: '0',
+                  background: "rgba(20, 20, 20, 0.95)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  color: "#ffffff",
+                  borderRadius: "0",
                 },
               }}
             />

@@ -182,13 +182,13 @@ export default clerkMiddleware(async (auth, req) => {
   // ═══════════════════════════════════════════════════════════════════════════
   // PHASE G: MFA ENFORCEMENT
   // ═══════════════════════════════════════════════════════════════════════════
-  const requiresMfa = ['AGENCY_OWNER', 'SUPER_ADMIN'].includes(role ?? '');
-  const mfaEnabled = (sessionClaims?.mfa_enabled as boolean) ?? false;
+ // const requiresMfa = ['AGENCY_OWNER', 'SUPER_ADMIN'].includes(role ?? '');
+  //const mfaEnabled = (sessionClaims?.mfa_enabled as boolean) ?? false;
 
-  if (requiresMfa && !mfaEnabled && !isMfaRoute(req)) {
-    console.warn(`[MFA] User ${userId} (${role}) blocked — MFA not enabled`);
-    return NextResponse.redirect(new URL('/mfa/setup', req.url));
-  }
+ // if (requiresMfa && !mfaEnabled && !isMfaRoute(req)) {
+  //  console.warn(`[MFA] User ${userId} (${role}) blocked — MFA not enabled`);
+   // return NextResponse.redirect(new URL('/mfa/setup', req.url));
+ // }
 
   // 5. Signed-in user on "/" → let app/page.tsx handle redirect server-side
   if (path === '/') return NextResponse.next();

@@ -11,6 +11,7 @@ import {
   integer,
 } from "drizzle-orm/pg-core";
 
+
 // ── Enums ──────────────────────────────────────────────────────────
 
 export const roleEnum = pgEnum("role", [
@@ -108,6 +109,12 @@ export const terminationReasonEnum = pgEnum("termination_reason", [
   "OTHER",
 ]);
 
+export const mfaStatusEnum = pgEnum("mfa_status", [
+  "PENDING",
+  "ENABLED",
+  "DISABLED"
+]);
+
 export const agencies = pgTable("agencies", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
@@ -117,6 +124,7 @@ export const agencies = pgTable("agencies", {
   isActive: boolean("is_active").default(true).notNull(),
   subscriptionStatus: text("subscription_status").default("TRIAL"),
 
+  inviteStatus: text("invite_status").default("PENDING").notNull(),
   // ── Soft delete & termination (NEW) ──────────────────────────────
   deletedAt: timestamp("deleted_at"),                    // null = active, set = terminated
   terminationReason: terminationReasonEnum("termination_reason"), // why contract ended
@@ -235,6 +243,8 @@ export const buildings = pgTable("buildings", {
   locale: text("locale"),
   landlordName: text("landlord_name").notNull(),
   landlordPhone: text("landlord_phone"),
+  darajaInitiatorName: text("daraja_initiator_name"),
+  darajaSecurityCredential: text("daraja_security_credential"),
   darajaConsumerKey: text("daraja_consumer_key"),
   darajaConsumerSecret: text("daraja_consumer_secret"),
   darajaShortcode: text("daraja_shortcode"),
@@ -548,6 +558,19 @@ export const reconciliationDiscrepancies = pgTable("reconciliation_discrepancies
   resolvedBy: text("resolved_by"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ── usersMfa ───────────────────────────────────────────────────
+
+export const usersMfa = pgTable("users_mfa", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  clerkUserId: text("clerk_user_id").unique().notNull(),
+  secret: text("secret").notNull(),
+  backupCodes: text("backup_codes").array().notNull(), // <-- must be .array()
+  status: mfaStatusEnum("status").default("PENDING").notNull(),
+  verifiedAt: timestamp("verified_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 

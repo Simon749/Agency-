@@ -33,7 +33,7 @@ const nextConfig: NextConfigWithEslint = {
     // Fix CSRF validation mismatch in GitHub Codespaces and external domains
     serverActions: {
       allowedOrigins: [
-        "localhost:3000",
+        "localhost:3001",
         "*.app.github.dev", // Allows any GitHub Codespaces preview URL
       ],
     },
@@ -58,43 +58,25 @@ const nextConfig: NextConfigWithEslint = {
   async headers() {
     return [
       {
-        // Dynamic pages: no cache, must revalidate
-        source: "/:path*",
+        source: "/((?!_next/static).*)",
         headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=0, must-revalidate",
-          },
+          { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
         ],
       },
       {
-        // Static Next.js chunks: immutable, 1 year
         source: "/_next/static/:path*",
         headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=31536000, immutable",
-          },
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
         ],
       },
       {
-        // Static assets in public folder: 1 day
         source: "/static/:path*",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=86400",
-          },
-        ],
+        headers: [{ key: "Cache-Control", value: "public, max-age=86400" }],
       },
       {
-        // Health check endpoint: no cache
         source: "/api/health",
         headers: [
-          {
-            key: "Cache-Control",
-            value: "no-store, no-cache, must-revalidate",
-          },
+          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate" },
         ],
       },
     ];

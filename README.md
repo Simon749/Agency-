@@ -103,3 +103,12 @@ export const agencies = pgTable("agencies", {
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+
+# stop the dev server first, then:
+rm -rf .next
+rm -rf node_modules/.cache
+
+
+
+pnpm ls next react react-dom -r
