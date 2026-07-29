@@ -305,6 +305,7 @@ export const billingRuns = pgTable("billing_runs", {
   processedTenants: integer("processed_tenants").default(0),
   entriesInserted: integer("entries_inserted").default(0),
   entriesSkipped: integer("entries_skipped").default(0),
+  failedTenants: jsonb("failed_tenants").default([]), // array of tenantIds that failed this run
   errorMessage: text("error_message"),
   qstashMessageId: text("qstash_message_id"), // for tracing
   qstashScheduleId: text("qstash_schedule_id"), // if scheduled
