@@ -297,8 +297,8 @@ export const billingRuns = pgTable("billing_runs", {
   id: uuid("id").primaryKey().defaultRandom(),
   agencyId: uuid("agency_id").notNull(),
   buildingId: uuid("building_id").notNull(),
-  billingMonth: text("billing_month").notNull(),
-  status: text("status").default("PENDING").notNull(),
+  billingMonth: text("billing_month").notNull(), // "2026-08"
+  status: text("status").default("PENDING").notNull(), // PENDING | RUNNING |
   attemptCount: integer("attempt_count").default(0).notNull(),
   maxAttempts: integer("max_attempts").default(3).notNull(),
   totalTenants: integer("total_tenants").default(0),
@@ -306,10 +306,13 @@ export const billingRuns = pgTable("billing_runs", {
   entriesInserted: integer("entries_inserted").default(0),
   entriesSkipped: integer("entries_skipped").default(0),
   errorMessage: text("error_message"),
+  qstashMessageId: text("qstash_message_id"), // for tracing
+  qstashScheduleId: text("qstash_schedule_id"), // if scheduled
   errorDetails: jsonb("error_details"),
   startedAt: timestamp("started_at"),
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  errorLog: jsonb("error_log").default([]), // Array of {tenantId, error, retryCount}
 });
 
 // ── Tenants ────────────────────────────────────────────────────────
