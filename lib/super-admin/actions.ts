@@ -11,7 +11,7 @@ import { getDb } from "@/lib/db";
 import { agencies, agencySubscriptions, subscriptionPayments } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { clerkClient } from "@clerk/nextjs/server";
-import { invalidateAgencyCache } from '@/proxy';
+import { invalidateAgencyCache } from '@/middleware';
 
 
 // ── 1. Kill Switch ─────────────────────────────────────────────────────────

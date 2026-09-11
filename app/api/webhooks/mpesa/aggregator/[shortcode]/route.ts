@@ -1,4 +1,11 @@
 //app/api/webhooks/mpesa/aggregator/[shortcode]/route.ts
+//
+// SECURITY FIX (Phase 0 audit): this route previously had NO verification
+// at all — no IP allowlist, no callback key — while inserting real CREDIT
+// ledger entries (i.e. marking rent as paid) from whatever the request
+// body claimed. Anyone who could guess a valid BillRefNumber could forge
+// a "payment received" for any tenant. Matched to the same pattern already
+// used correctly in ../[shortcode]/route.ts and ../b2c-result/[shortcode]/route.ts.
 
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
@@ -7,11 +14,33 @@ import { resolveAggregatorPayment } from "@/lib/payments/aggregator-router";
 import { eq } from "drizzle-orm";
 import { dispatchNotification } from "@/lib/notifications/channel-router";
 
+const SAFARICOM_IP_RANGES = ["197.248.", "41.215."];
+
+function isSafaricomIp(ip: string): boolean {
+  return SAFARICOM_IP_RANGES.some((range) => ip.startsWith(range));
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ shortcode: string }> }
 ) {
   const { shortcode } = await params;
+
+  const forwardedFor = req.headers.get("x-forwarded-for");
+  const clientIp = forwardedFor?.split(",")[0]?.trim() ?? req.headers.get("x-real-ip") ?? "unknown";
+
+  if (!isSafaricomIp(clientIp)) {
+    console.warn(`[AGGREGATOR] Rejected callback from non-Safaricom IP: ${clientIp} for shortcode ${shortcode}`);
+    return NextResponse.json({ ResultCode: "1", ResultDesc: "Rejected — Unauthorized IP" }, { status: 403 });
+  }
+
+  const callbackKey = req.headers.get("x-callback-key");
+  const expectedKey = process.env.DARAJA_CALLBACK_KEY;
+  if (expectedKey && callbackKey !== expectedKey) {
+    console.warn(`[AGGREGATOR] Invalid callback key from ${clientIp} for shortcode ${shortcode}`);
+    return NextResponse.json({ ResultCode: "1", ResultDesc: "Rejected — Invalid callback key" }, { status: 403 });
+  }
+
   const body = await req.json();
   
   // Safaricom C2B confirmation payload structure

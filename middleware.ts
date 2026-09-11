@@ -1,26 +1,40 @@
 /**
- * REFACTORED: middleware.ts with RLS-aware patterns
- * 
- * KEY CHANGE: The middleware does two types of DB reads:
- * 1. Kill-switch check (isAgencyActive) — reads agencies table
- * 2. Tenant status check (isTenantVacated) — reads tenants table
- * 
- * Problem: These run BEFORE route handlers, so we can't use withAgencyContext()
- * (which reads from the Clerk session). The middleware IS where we read Clerk.
- * 
- * Solution:
- * - agencies table: Special RLS policy allows public reads (needed for kill-switch)
- * - tenants table: We keep the raw query BUT add a defense-in-depth check
- * 
- * This file shows the MINIMAL changes needed to your existing middleware.
+ * middleware.ts — the real kill-switch + route-guard layer.
+ *
+ * HISTORY / WHY THIS COMMENT IS HERE:
+ * This file used to live at the repo root as `proxy.ts`. Next.js only ever
+ * executes a file literally named `middleware.ts` (or `.js`) — `proxy.ts`
+ * was never picked up by the framework, which meant every check below
+ * (kill-switch, role routing, super-admin guard, field-agent restriction)
+ * had been fully written but had never actually run, since first commit.
+ * If you're wondering why the kill switch "worked" in code review but not
+ * in practice, this was why. See CODE_AUDIT_CLOSURE_TRACKER.md Phase 0.
+ *
+ * DB ACCESS NOTE:
+ * Middleware runs on Next's Edge runtime by default, which does not
+ * support the `ws` (websocket) package used by lib/db/index.ts's Pool.
+ * The kill-switch check below therefore uses `neon()`, the HTTP-based
+ * Neon client — a single fetch, no pool, no websocket, Edge-safe. This is
+ * intentionally NOT the same DB client used elsewhere in the app; do not
+ * "simplify" this to use getDb() without confirming Edge/Node runtime
+ * compatibility first.
+ *
+ * The agencies table has a dedicated RLS policy (`agencies_public_read`,
+ * `USING (true)`) specifically so this unauthenticated-context read is
+ * allowed — see db/migrations/0004d_clean_rls_reset.sql. Without that
+ * policy this query would silently return zero rows under RLS and the
+ * kill switch would fail open (see the `?? true` fallback below).
+ *
+ * Tenant VACATED status is intentionally NOT checked here — that requires
+ * RLS session context this layer doesn't have. It's enforced instead in
+ * app/tenant/layout.tsx via withAgencyContext-style access, which already
+ * exists and works. Don't duplicate that check here.
  */
 
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { clerkClient } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { agencies, tenants } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { neon } from '@neondatabase/serverless';
 
 const isSuperAdminRoute = createRouteMatcher(['/super-admin(.*)']);
 const isAdminRoute = createRouteMatcher(['/admin(.*)']);
@@ -50,14 +64,26 @@ interface CacheEntry {
 
 const agencyStatusCache = new Map<string, CacheEntry>();
 
+// Lazily created so a missing DATABASE_URL doesn't crash module load in
+// environments (like some test runners) that never hit an admin route.
+let _sql: ReturnType<typeof neon> | null = null;
+function getSql() {
+  if (!_sql) {
+    const url = process.env.DATABASE_URL;
+    if (!url) throw new Error('[KILL SWITCH] DATABASE_URL is not set');
+    _sql = neon(url);
+  }
+  return _sql;
+}
+
 /**
- * ✅ REFACTORED for RLS Phase A
- * 
- * agencies table has a special RLS policy: agencies_public_read allows ALL SELECT.
- * This is intentional — the middleware must check kill-switch before RLS context exists.
- * 
- * The query still filters by agencyId (defense-in-depth), but RLS won't block it
- * because of the public read policy.
+ * Kill-switch check. Edge-safe (HTTP fetch via neon(), no websocket pool).
+ * Relies on the `agencies_public_read` RLS policy (USING (true)) so this
+ * unauthenticated-context read is allowed. Fails OPEN on DB error (5-10s
+ * cache) so a transient DB blip doesn't lock every agency out — that's a
+ * deliberate availability tradeoff, not an oversight. If you want it to
+ * fail CLOSED instead, change the catch block below and accept that a
+ * Neon outage would then suspend every agency simultaneously.
  */
 async function isAgencyActive(agencyId: string): Promise<boolean> {
   const now = Date.now();
@@ -67,15 +93,9 @@ async function isAgencyActive(agencyId: string): Promise<boolean> {
   }
 
   try {
-    const db = getDb();
-
-    // Defense-in-depth: still filter by agencyId even though RLS allows public reads
-    const [agency] = await db
-      .select({ isActive: agencies.isActive })
-      .from(agencies)
-      .where(eq(agencies.id, agencyId));
-
-    const isActive = agency?.isActive ?? true;
+    const sql = getSql();
+    const rows = (await sql`SELECT is_active FROM agencies WHERE id = ${agencyId} LIMIT 1`) as Array<{ is_active: boolean }>;
+    const isActive = rows[0]?.is_active ?? true;
     agencyStatusCache.set(agencyId, { isActive, expiresAt: now + CACHE_TTL_MS });
     return isActive;
   } catch (err) {
@@ -85,57 +105,10 @@ async function isAgencyActive(agencyId: string): Promise<boolean> {
   }
 }
 
-/**
- * ✅ REFACTORED for RLS Phase A
- * 
- * Problem: isTenantVacated reads tenants table, which now has RLS enabled.
- * Without RLS context, this query would return ZERO rows (RLS blocks everything).
- * 
- * Solution: We use clerkUserId (from the JWT) to look up the tenant. Since
- * tenants.clerkUserId is UNIQUE, we can safely read without agencyId — but we
- * MUST verify the returned tenant actually belongs to the expected agency.
- * 
- * However, with RLS + FORCE, even this query is blocked without a session variable.
- * 
- * WORKAROUND: For middleware ONLY, we temporarily set a dummy session variable
- * that matches the tenant's agency. This requires a round-trip to the DB.
- * 
- * BETTER WORKAROUND (implemented here): Use a raw query that bypasses RLS
- * for the specific clerkUserId lookup. This is safe because clerkUserId is
- * globally unique (Clerk guarantees this).
- * 
- * ALTERNATIVE: Don't read tenants in middleware. Move vacated check to
- * a Server Component or API route where withAgencyContext() is available.
- * This is the CLEANEST solution and recommended for production.
- */
-async function isTenantVacated(clerkUserId: string): Promise<boolean> {
-  try {
-    const db = getDb();
-
-    // With RLS enabled, this query needs context. Since we're in middleware,
-    // we can't use withAgencyContext(). Two options:
-
-    // OPTION A (implemented): Raw query with explicit agency context
-    // We look up the tenant by clerkUserId, which is unique across all agencies
-    const result = await db.execute(/* sql */ `
-      SELECT status FROM tenants 
-      WHERE clerk_user_id = ${clerkUserId}
-      LIMIT 1
-    `);
-
-    // Wait — with RLS FORCE, this still returns zero rows.
-    // We need to set the session variable first.
-
-    // OPTION B (recommended): Move this check out of middleware
-    // See the comment in the main middleware function below.
-
-    const tenant = result.rows[0] as { status: string } | undefined;
-    return tenant?.status === 'VACATED';
-  } catch (err) {
-    console.error('[MIDDLEWARE] Error checking tenant status:', err);
-    return false;
-  }
-}
+// Tenant VACATED status is deliberately NOT checked here.
+// See app/tenant/layout.tsx — it already performs this check with proper
+// RLS/session context on every tenant page load. Duplicating it here would
+// require a second DB round trip in Edge middleware for no real benefit.
 
 // ─── Exported cache invalidator ──────────────────────────────────────────────
 export function invalidateAgencyCache(agencyId: string): void {
@@ -205,33 +178,14 @@ export default clerkMiddleware(async (auth, req) => {
     );
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 8. Tenant route guard + VACATED check
-  // 
-  // ⚠️  RLS PHASE A NOTE: isTenantVacated() reads the tenants table which
-  // now has RLS enabled. Without a session variable, this returns zero rows.
-  // 
-  // RECOMMENDED FIX: Move the vacated check to a Server Component layout
-  // for /tenant/* routes. The layout can use withAgencyContextRead() to
-  // properly set RLS context before querying.
-  // 
-  // IMMEDIATE FIX (for today): We skip the DB check in middleware and instead
-  // add a vacated check in the tenant dashboard Server Component. If the
-  // tenant is vacated, redirect to /deactivated there.
-  // ═══════════════════════════════════════════════════════════════════════════
-
+  // 8. Tenant route guard. VACATED status is checked in app/tenant/layout.tsx,
+  // not here — see the file header comment for why.
   if (isTenantRoute(req)) {
     if (role !== 'TENANT') {
       return NextResponse.redirect(
         new URL(role ? (ROLE_HOME[role] ?? '/sign-in') : '/sign-in', req.url)
       );
     }
-
-    // SKIP: isTenantVacated check in middleware — moved to layout
-    // const vacated = await isTenantVacated(userId);
-    // if (vacated && path !== '/deactivated') {
-    //   return NextResponse.redirect(new URL('/deactivated', req.url));
-    // }
   }
 
   // 9. Admin route guard + KILL SWITCH check
@@ -267,37 +221,3 @@ export const config = {
     '/((?!_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };
-
-/**
- * ADDITIONAL FILE: app/(tenant)/layout.tsx
- * 
- * Add this Server Component layout to handle the vacated check with proper RLS context:
- * 
- * ```tsx
- * import { redirect } from 'next/navigation';
- * import { withAgencyContextRead } from '@/lib/db/rls';
- * import { tenants } from '@/db/schema';
- * import { eq } from 'drizzle-orm';
- * import { auth } from '@clerk/nextjs/server';
- * 
- * export default async function TenantLayout({ children }: { children: React.ReactNode }) {
- *   const { userId } = await auth();
- *   if (!userId) redirect('/sign-in');
- * 
- *   const tenant = await withAgencyContextRead(async (tx) => {
- *     const [t] = await tx
- *       .select({ status: tenants.status })
- *       .from(tenants)
- *       .where(eq(tenants.clerkUserId, userId))
- *       .limit(1);
- *     return t;
- *   });
- * 
- *   if (tenant?.status === 'VACATED') {
- *     redirect('/deactivated');
- *   }
- * 
- *   return <>{children}</>;
- * }
- * ```
- */

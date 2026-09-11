@@ -7,6 +7,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { tenants, buildings, buildingUtilities, units, tenantLedger, billingRuns } from "@/db/schema";
 import type { InsertTenantLedgerEntry } from "@/db/schema";
+import { verifyQStashSignature } from "@/lib/qstash";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 interface BillBuildingPayload {
@@ -20,23 +21,22 @@ interface BillBuildingPayload {
 export async function POST(req: NextRequest) {
     const startTime = Date.now();
 
-    // ── 1. Verify QStash signature ─────────────────────────────────────────
-    // QStash sends the payload as the body with a signed header
-    const signature = req.headers.get("upstash-signature");
-    if (!signature) {
-        return NextResponse.json({ error: "Missing QStash signature" }, { status: 401 });
+    // ── 1. Verify QStash signature (Phase 0 audit fix) ─────────────────────
+    // Previously this only checked that an `upstash-signature` header was
+    // PRESENT, not that it was valid — any caller could set that header to
+    // any string and this route would proceed to insert real DEBIT ledger
+    // entries. Now verifies the signature cryptographically against
+    // QSTASH_CURRENT_SIGNING_KEY / QSTASH_NEXT_SIGNING_KEY.
+    const bodyText = await req.text();
+    const isValid = await verifyQStashSignature(req, bodyText);
+    if (!isValid) {
+        return NextResponse.json({ error: "Invalid or missing QStash signature" }, { status: 401 });
     }
-
-    // Optional: full signature verification (see lib/qstash.ts verifyQStashSignature)
-    // For production, enable this. For dev, the signature presence is a basic check.
-    // const bodyText = await req.text();
-    // const isValid = await verifyQStashSignature(req, bodyText);
-    // if (!isValid) { ... }
 
     // ── 2. Parse payload ───────────────────────────────────────────────────
     let payload: BillBuildingPayload;
     try {
-        payload = await req.json();
+        payload = JSON.parse(bodyText);
     } catch {
         return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
     }
